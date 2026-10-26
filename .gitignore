@@ -1,0 +1,50 @@
+# Local environment files; keep only the credential-free template.
+.env*
+!.env.example
+
+# Credentials and private keys.
+auth.json
+**/auth.json
+*.key
+*.pem
+*.p12
+*.pfx
+*.ppk
+id_rsa*
+id_ed25519*
+/.aws/
+**/.aws/
+/.ssh/
+**/.ssh/
+/secrets.json
+**/secrets.json
+
+# Logs and generated runtime files.
+*.log
+/storage/logs/**
+!/storage/logs/.gitignore
+/storage/pail/**
+/bootstrap/cache/*
+!/bootstrap/cache/.gitignore
+/storage/framework/cache/**
+!/storage/framework/cache/**/.gitignore
+/storage/framework/sessions/**
+!/storage/framework/sessions/**/.gitignore
+/storage/framework/testing/**
+!/storage/framework/testing/**/.gitignore
+/storage/framework/views/**
+!/storage/framework/views/**/.gitignore
+/public/storage
+
+# Local caches and OS metadata.
+/.composer-cache/
+/.composer-home/
+/.phpunit.cache/
+.phpunit.result.cache
+.phpactor.json
+.DS_Store
+Thumbs.db
+
+# Local machine provisioning data.
+Homestead.json
+Homestead.yaml

@@ -1,0 +1,72 @@
+{
+    "name": "spatie/laravel-route-attributes",
+    "description": "Auto register routes using PHP attributes",
+    "keywords": [
+        "spatie",
+        "laravel-route-attributes"
+    ],
+    "homepage": "https://github.com/spatie/laravel-route-attributes",
+    "license": "MIT",
+    "authors": [
+        {
+            "name": "Freek Van der Herten",
+            "email": "freek@spatie.be",
+            "homepage": "https://spatie.be",
+            "role": "Developer"
+        }
+    ],
+    "require": {
+        "php": "^8.3",
+        "illuminate/contracts": "^11.0|^12.0|^13.0",
+        "nesbot/carbon": "^2.63|^3.0",
+        "spatie/php-attribute-reader": "^1.0"
+    },
+    "require-dev": {
+        "laravel/pint": "^1.25",
+        "orchestra/testbench": "^9.0|^10.0|^11.0",
+        "pestphp/pest": "^3.0|^4.0",
+        "pestphp/pest-plugin-laravel": "^3.0|^4.0"
+    },
+    "autoload": {
+        "psr-4": {
+            "Spatie\\RouteAttributes\\": "src",
+            "Spatie\\RouteAttributes\\Database\\Factories\\": "database/factories"
+        }
+    },
+    "autoload-dev": {
+        "psr-4": {
+            "Spatie\\RouteAttributes\\Tests\\": "tests"
+        }
+    },
+    "scripts": {
+        "psalm": "vendor/bin/psalm",
+        "test": "vendor/bin/pest --colors=always",
+        "test-coverage": "vendor/bin/pest --coverage-html coverage",
+        "format": "vendor/bin/pint"
+    },
+    "config": {
+        "sort-packages": true,
+        "allow-plugins": {
+            "pestphp/pest-plugin": true
+        }
+    },
+    "extra": {
+        "laravel": {
+            "providers": [
+                "Spatie\\RouteAttributes\\RouteAttributesServiceProvider"
+            ]
+        }
+    },
+    "minimum-stability": "dev",
+    "prefer-stable": true,
+    "funding": [
+        {
+            "type": "github",
+            "url": "https://github.com/sponsors/spatie"
+        },
+        {
+            "type": "other",
+            "url": "https://spatie.be/open-source/support-us"
+        }
+    ]
+}

@@ -1,0 +1,51 @@
+{
+    "name": "spatie/php-attribute-reader",
+    "description": "A clean API for working with PHP attributes",
+    "keywords": [
+        "spatie",
+        "php-attribute-reader",
+        "attributes",
+        "reflection"
+    ],
+    "homepage": "https://github.com/spatie/php-attribute-reader",
+    "license": "MIT",
+    "authors": [
+        {
+            "name": "Freek Van der Herten",
+            "email": "freek@spatie.be",
+            "homepage": "https://spatie.be",
+            "role": "Developer"
+        }
+    ],
+    "require": {
+        "php": "^8.0"
+    },
+    "require-dev": {
+        "pestphp/pest": "^1.0|^2.0|^3.0|^4.0"
+    },
+    "autoload": {
+        "psr-4": {
+            "Spatie\\Attributes\\": "src"
+        }
+    },
+    "autoload-dev": {
+        "psr-4": {
+            "Spatie\\Attributes\\Tests\\": "tests"
+        },
+        "files": [
+            "tests/TestSupport/TestFunction.php"
+        ]
+    },
+    "scripts": {
+        "test": "vendor/bin/pest --colors=always",
+        "test-coverage": "vendor/bin/pest --coverage-html coverage"
+    },
+    "config": {
+        "sort-packages": true,
+        "allow-plugins": {
+            "pestphp/pest-plugin": true
+        }
+    },
+    "minimum-stability": "dev",
+    "prefer-stable": true
+}

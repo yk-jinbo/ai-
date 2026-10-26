@@ -1,0 +1,81 @@
+services:
+  app:
+    image: pc-management-system:prod
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: pc_management_image_app
+    restart: unless-stopped
+    working_dir: /var/www/html
+    env_file:
+      - .env
+    environment:
+      APP_ENV: production
+      APP_DEBUG: "false"
+      LOG_CHANNEL: stack
+      LOG_STACK: single
+      DB_CONNECTION: ${DB_CONNECTION:?DB_CONNECTION 未设置}
+      DB_HOST: ${DB_HOST:?DB_HOST 未设置}
+      DB_PORT: ${DB_PORT:?DB_PORT 未设置}
+      DB_DATABASE: ${DB_DATABASE:?DB_DATABASE 未设置}
+      DB_USERNAME: ${DB_USERNAME:?DB_USERNAME 未设置}
+      DB_PASSWORD: ${DB_PASSWORD:-}
+      DATA_BRIDGE_DB_CONNECTION: ${DATA_BRIDGE_DB_CONNECTION:-mysql}
+      DATA_BRIDGE_DB_HOST: ${DATA_BRIDGE_DB_HOST:-127.0.0.1}
+      DATA_BRIDGE_DB_PORT: ${DATA_BRIDGE_DB_PORT:-3306}
+      DATA_BRIDGE_DB_DATABASE: ${DATA_BRIDGE_DB_DATABASE:-data_bridge}
+      DATA_BRIDGE_DB_USERNAME: ${DATA_BRIDGE_DB_USERNAME:-root}
+      DATA_BRIDGE_DB_PASSWORD: ${DATA_BRIDGE_DB_PASSWORD:-}
+      DATA_BRIDGE_DB_SOCKET: ${DATA_BRIDGE_DB_SOCKET:-}
+      DATA_BRIDGE_DB_CHARSET: ${DATA_BRIDGE_DB_CHARSET:-utf8mb4}
+      DATA_BRIDGE_DB_COLLATION: ${DATA_BRIDGE_DB_COLLATION:-utf8mb4_unicode_ci}
+      DATA_BRIDGE_DB_PREFIX: ${DATA_BRIDGE_DB_PREFIX:-km_}
+      DATA_BRIDGE_DB_URL: ${DATA_BRIDGE_DB_URL:-}
+      DATA_BRIDGE_MYSQL_ATTR_SSL_CA: ${DATA_BRIDGE_MYSQL_ATTR_SSL_CA:-}
+      REDIS_CLIENT: ${REDIS_CLIENT:?REDIS_CLIENT 未设置}
+      REDIS_HOST: ${REDIS_HOST:?REDIS_HOST 未设置}
+      REDIS_PASSWORD: ${REDIS_PASSWORD:-}
+      REDIS_PORT: ${REDIS_PORT:?REDIS_PORT 未设置}
+    volumes:
+      - ./storage/logs:/var/www/html/storage/logs
+    logging:
+      driver: json-file
+      options:
+        max-size: 10m
+        max-file: "3"
+    networks:
+      - image_laravel_network
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+
+  nginx:
+    image: pc-management-system:prod-nginx
+    build:
+      context: .
+      dockerfile: docker/nginx/Dockerfile
+    container_name: pc_management_image_nginx
+    restart: unless-stopped
+    environment:
+      NGINX_PROTOCOL: ${NGINX_PROTOCOL:-https}
+      PC_MANAGEMENT_HTTP_PORT: ${PC_MANAGEMENT_HTTP_PORT:-}
+      PC_MANAGEMENT_HTTPS_PORT: ${PC_MANAGEMENT_HTTPS_PORT:-}
+      NGINX_SSL_CERTIFICATE: ${NGINX_SSL_CERTIFICATE:-}
+      NGINX_SSL_CERTIFICATE_KEY: ${NGINX_SSL_CERTIFICATE_KEY:-}
+    ports:
+      - "${PC_MANAGEMENT_HTTP_PORT:-0}:80"
+      - "${PC_MANAGEMENT_HTTPS_PORT:-0}:443"
+    volumes:
+      - /etc/nginx/ssl:/etc/nginx/ssl:ro
+    networks:
+      - image_laravel_network
+    depends_on:
+      - app
+    logging:
+      driver: json-file
+      options:
+        max-size: 10m
+        max-file: "3"
+
+networks:
+  image_laravel_network:
+    driver: bridge

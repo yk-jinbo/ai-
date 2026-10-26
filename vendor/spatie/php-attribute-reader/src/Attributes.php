@@ -1,0 +1,307 @@
+<?php
+
+namespace Spatie\Attributes;
+
+use ReflectionAttribute;
+use ReflectionClass;
+use ReflectionException;
+use ReflectionFunction;
+
+class Attributes
+{
+    /**
+     * @template T of object
+     *
+     * @param  class-string|object  $class
+     * @param  class-string<T>|null  $attribute
+     * @return T|null
+     */
+    public static function get(string|object $class, ?string $attribute = null): ?object
+    {
+        return self::firstFrom(self::reflect($class)->getAttributes(...self::attributeArgs($attribute)));
+    }
+
+    /**
+     * @param  class-string|object  $class
+     * @param  class-string|null  $attribute
+     */
+    public static function has(string|object $class, ?string $attribute = null): bool
+    {
+        return self::reflect($class)->getAttributes(...self::attributeArgs($attribute)) !== [];
+    }
+
+    /**
+     * @template T of object
+     *
+     * @param  class-string|object  $class
+     * @param  class-string<T>|null  $attribute
+     * @return array<T>
+     */
+    public static function getAll(string|object $class, ?string $attribute = null): array
+    {
+        return self::instantiateAll(self::reflect($class)->getAttributes(...self::attributeArgs($attribute)));
+    }
+
+    /**
+     * @template T of object
+     *
+     * @param  class-string|object  $class
+     * @param  class-string<T>|null  $attribute
+     * @return array<T>
+     */
+    public static function getAllOnMethod(string|object $class, string $method, ?string $attribute = null): array
+    {
+        $reflection = self::reflect($class);
+
+        if (! $reflection->hasMethod($method)) {
+            return [];
+        }
+
+        return self::instantiateAll($reflection->getMethod($method)->getAttributes(...self::attributeArgs($attribute)));
+    }
+
+    /**
+     * @template T of object
+     *
+     * @param  class-string|object  $class
+     * @param  class-string<T>|null  $attribute
+     * @return array<T>
+     */
+    public static function getAllOnProperty(string|object $class, string $property, ?string $attribute = null): array
+    {
+        $reflection = self::reflect($class);
+
+        if (! $reflection->hasProperty($property)) {
+            return [];
+        }
+
+        return self::instantiateAll($reflection->getProperty($property)->getAttributes(...self::attributeArgs($attribute)));
+    }
+
+    /**
+     * @template T of object
+     *
+     * @param  class-string|object  $class
+     * @param  class-string<T>|null  $attribute
+     * @return array<T>
+     */
+    public static function getAllOnConstant(string|object $class, string $constant, ?string $attribute = null): array
+    {
+        $reflection = self::reflect($class);
+
+        if (! $reflection->hasConstant($constant)) {
+            return [];
+        }
+
+        return self::instantiateAll($reflection->getReflectionConstant($constant)->getAttributes(...self::attributeArgs($attribute)));
+    }
+
+    /**
+     * @template T of object
+     *
+     * @param  class-string|object  $class
+     * @param  class-string<T>|null  $attribute
+     * @return array<T>
+     */
+    public static function getAllOnParameter(string|object $class, string $method, string $parameter, ?string $attribute = null): array
+    {
+        $reflection = self::reflect($class);
+
+        if (! $reflection->hasMethod($method)) {
+            return [];
+        }
+
+        return self::instantiateAll(self::findParameter($reflection->getMethod($method), $parameter)?->getAttributes(...self::attributeArgs($attribute)) ?? []);
+    }
+
+    /**
+     * @template T of object
+     *
+     * @param  class-string<T>|null  $attribute
+     * @return array<T>
+     */
+    public static function getAllOnFunction(string $function, ?string $attribute = null): array
+    {
+        try {
+            return self::instantiateAll((new ReflectionFunction($function))->getAttributes(...self::attributeArgs($attribute)));
+        } catch (ReflectionException) {
+            return [];
+        }
+    }
+
+    /**
+     * @template T of object
+     *
+     * @param  class-string|object  $class
+     * @param  class-string<T>|null  $attribute
+     * @return T|null
+     */
+    public static function onMethod(string|object $class, string $method, ?string $attribute = null): ?object
+    {
+        $reflection = self::reflect($class);
+
+        if (! $reflection->hasMethod($method)) {
+            return null;
+        }
+
+        return self::firstFrom($reflection->getMethod($method)->getAttributes(...self::attributeArgs($attribute)));
+    }
+
+    /**
+     * @template T of object
+     *
+     * @param  class-string|object  $class
+     * @param  class-string<T>|null  $attribute
+     * @return T|null
+     */
+    public static function onProperty(string|object $class, string $property, ?string $attribute = null): ?object
+    {
+        $reflection = self::reflect($class);
+
+        if (! $reflection->hasProperty($property)) {
+            return null;
+        }
+
+        return self::firstFrom($reflection->getProperty($property)->getAttributes(...self::attributeArgs($attribute)));
+    }
+
+    /**
+     * @template T of object
+     *
+     * @param  class-string|object  $class
+     * @param  class-string<T>|null  $attribute
+     * @return T|null
+     */
+    public static function onConstant(string|object $class, string $constant, ?string $attribute = null): ?object
+    {
+        $reflection = self::reflect($class);
+
+        if (! $reflection->hasConstant($constant)) {
+            return null;
+        }
+
+        return self::firstFrom($reflection->getReflectionConstant($constant)->getAttributes(...self::attributeArgs($attribute)));
+    }
+
+    /**
+     * @template T of object
+     *
+     * @param  class-string|object  $class
+     * @param  class-string<T>|null  $attribute
+     * @return T|null
+     */
+    public static function onParameter(string|object $class, string $method, string $parameter, ?string $attribute = null): ?object
+    {
+        $reflection = self::reflect($class);
+
+        if (! $reflection->hasMethod($method)) {
+            return null;
+        }
+
+        return self::firstFrom(self::findParameter($reflection->getMethod($method), $parameter)?->getAttributes(...self::attributeArgs($attribute)) ?? []);
+    }
+
+    /**
+     * @template T of object
+     *
+     * @param  class-string<T>|null  $attribute
+     * @return T|null
+     */
+    public static function onFunction(string $function, ?string $attribute = null): ?object
+    {
+        try {
+            return self::firstFrom((new ReflectionFunction($function))->getAttributes(...self::attributeArgs($attribute)));
+        } catch (ReflectionException) {
+            return null;
+        }
+    }
+
+    /**
+     * @template T of object
+     *
+     * @param  class-string|object  $class
+     * @param  class-string<T>|null  $attribute
+     * @return array<AttributeTarget>
+     */
+    public static function find(string|object $class, ?string $attribute = null): array
+    {
+        $reflection = self::reflect($class);
+        $results = [];
+        $args = self::attributeArgs($attribute);
+
+        foreach ($reflection->getAttributes(...$args) as $attr) {
+            $results[] = new AttributeTarget($attr->newInstance(), $reflection, $reflection->getName());
+        }
+
+        foreach ($reflection->getMethods() as $method) {
+            foreach ($method->getAttributes(...$args) as $attr) {
+                $results[] = new AttributeTarget($attr->newInstance(), $method, $method->getName());
+            }
+
+            foreach ($method->getParameters() as $parameter) {
+                foreach ($parameter->getAttributes(...$args) as $attr) {
+                    $results[] = new AttributeTarget($attr->newInstance(), $parameter, $method->getName().'.'.$parameter->getName());
+                }
+            }
+        }
+
+        foreach ($reflection->getProperties() as $property) {
+            foreach ($property->getAttributes(...$args) as $attr) {
+                $results[] = new AttributeTarget($attr->newInstance(), $property, $property->getName());
+            }
+        }
+
+        foreach ($reflection->getReflectionConstants() as $constant) {
+            foreach ($constant->getAttributes(...$args) as $attr) {
+                $results[] = new AttributeTarget($attr->newInstance(), $constant, $constant->getName());
+            }
+        }
+
+        return $results;
+    }
+
+    protected static function reflect(string|object $class): ReflectionClass
+    {
+        return new ReflectionClass($class);
+    }
+
+    /**
+     * @param  array<ReflectionAttribute>  $attributes
+     */
+    protected static function firstFrom(array $attributes): ?object
+    {
+        if ($attributes === []) {
+            return null;
+        }
+
+        return $attributes[0]->newInstance();
+    }
+
+    /**
+     * @param  array<ReflectionAttribute>  $attributes
+     * @return array<object>
+     */
+    protected static function instantiateAll(array $attributes): array
+    {
+        return array_map(fn (ReflectionAttribute $attr) => $attr->newInstance(), $attributes);
+    }
+
+    /**
+     * @return array{}|array{class-string, int}
+     */
+    protected static function attributeArgs(?string $attribute): array
+    {
+        return $attribute !== null ? [$attribute, ReflectionAttribute::IS_INSTANCEOF] : [];
+    }
+
+    protected static function findParameter(\ReflectionMethod $method, string $name): ?\ReflectionParameter
+    {
+        foreach ($method->getParameters() as $parameter) {
+            if ($parameter->getName() === $name) {
+                return $parameter;
+            }
+        }
+
+        return null;
+    }
+}
