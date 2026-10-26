@@ -48,3 +48,7 @@ Thumbs.db
 # Local machine provisioning data.
 Homestead.json
 Homestead.yaml
+
+# IDE metadata and local project state.
+/.idea/
+
