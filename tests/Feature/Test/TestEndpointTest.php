@@ -25,7 +25,7 @@ class TestEndpointTest extends TestCase
         $response->assertJsonStructure(['code', 'message', 'data' => ['status', 'version', 'message']]);
         $response->assertExactJson([
             'code' => ApiCode::SUCCESS->value,
-            'message' => '测试接口访问成功',
+            'message' => '测试接口访问成功1',
             'data' => [
                 'status' => 'ok',
                 'version' => 'test-api-v1',

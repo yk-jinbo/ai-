@@ -40,7 +40,7 @@ class TestController extends Controller
 
         return ResponseHelper::success(
             $this->testService->getStatus($input['message'] ?? null),
-            '测试接口访问成功',
+            '测试接口访问成功1',
         );
     }
 }
