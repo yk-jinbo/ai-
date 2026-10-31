@@ -35,8 +35,13 @@ return [
         ],
     ],
 
-    'open_auth' => [
-        'base_url' => env('OPEN_AUTH_BASE_URL'),
+    'member_auth' => [
+        'base_url' => env('MEMBER_AUTH_BASE_URL'),
+        'gateway_prefix' => env('MEMBER_AUTH_GATEWAY_PREFIX', 'api-iam'),
+        'api_prefix' => env('MEMBER_AUTH_API_PREFIX', 'api/v1'),
+        'connect_timeout' => (int) env('MEMBER_AUTH_CONNECT_TIMEOUT_SECONDS', 3),
+        'timeout' => (int) env('MEMBER_AUTH_TIMEOUT_SECONDS', 10),
+        'token_ttl_seconds' => (int) env('MEMBER_AUTH_TOKEN_TTL_SECONDS', 172800),
     ],
 
 ];

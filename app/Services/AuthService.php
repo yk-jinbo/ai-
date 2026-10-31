@@ -4,124 +4,217 @@ namespace App\Services;
 
 use App\Enums\ApiCode;
 use App\Helpers\ResponseHelper;
-use App\Models\AdminUserModel;
-use App\Repositories\AdminPersonalAccessTokenRepository;
-use App\Repositories\AdminUserRepository;
-use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Arr;
 
+/**
+ * 会员认证业务服务。
+ *
+ * 负责滑块校验、上游认证结果转换和外部令牌的本地 Redis 保存，不访问本地数据库。
+ */
 class AuthService
 {
+    private const DEFAULT_TICKET_TTL_SECONDS = 300;
+
+    /**
+     * 注入上游认证客户端、本地令牌服务和滑块验证码服务。
+     *
+     * @param  ExternalAuthClient  $externalAuthClient  上游会员认证客户端
+     * @param  AuthTokenService  $authTokenService  本地 Redis 令牌服务
+     * @param  LoginCaptchaService  $loginCaptchaService  本地滑块验证码服务
+     * @return void
+     */
     public function __construct(
-        private AdminUserRepository $userRepository,
-        private AdminPersonalAccessTokenRepository $personalAccessTokenRepository,
+        private ExternalAuthClient $externalAuthClient,
+        private AuthTokenService $authTokenService,
         private LoginCaptchaService $loginCaptchaService,
     ) {}
 
-    /**
-     * 校验滑块验证码并签发后台登录凭证。
-     *
-     * 业务逻辑：验证码在数据库事务前一次性消费，避免无效请求持有账号行锁。
-     *
-     * @param  string  $username  后台账号
-     * @param  string  $password  后台密码
-     * @param  string  $captchaId  滑块验证码标识
-     * @param  int  $offsetX  滑块目标横坐标
-     * @return array<string, mixed> 登录凭证和当前用户信息
-     */
-    public function login(string $username, string $password, string $captchaId, int $offsetX): array
+    /** 发送短信前消费本地滑块验证码，再转发登录短信请求。 */
+    public function sendSms(string $mobile, string $captchaId, int $offsetX): string
     {
         $this->loginCaptchaService->verify($captchaId, $offsetX);
+        $result = $this->externalAuthClient->sendSms($mobile);
+        $this->ensureSuccess($result, '验证码发送失败');
 
-        DB::beginTransaction();
-        try {
-            // 锁定账号行，保证同一账号的旧凭证撤销与新凭证签发不会交叉执行。
-            $user = $this->userRepository->findByUsernameForUpdate($username);
+        return $result->message !== null && $result->message !== ''
+            ? $result->message
+            : '验证码已发送';
+    }
 
-            // 验证用户是否存在、密码是否正确、账号状态是否可登录
-            // 统一返回"用户名或密码错误"，不泄露账号是否存在或具体状态
-            ResponseHelper::errorIf(
-                ! $user || ! $this->userRepository->verifyPassword($user, $password) || ! $user->canLogin(),
-                '用户名或密码错误',
-                ApiCode::UNAUTHORIZED
-            );
+    /** 校验账号密码并返回待确认的身份集合，不签发访问令牌。 */
+    public function preparePasswordLogin(
+        string $username,
+        string $password,
+        string $captchaId,
+        int $offsetX,
+    ): AuthLoginResult {
+        $this->loginCaptchaService->verify($captchaId, $offsetX);
+        $result = $this->externalAuthClient->preparePasswordLogin($username, $password);
+        $this->ensureSuccess($result, '账号或密码错误');
 
-            // 并发安全：撤销旧凭证并签发新凭证
-            $this->personalAccessTokenRepository->revokeAllFor($user);
+        return new AuthLoginResult(
+            $this->normalizePrepareData($result->data),
+            $result->message !== null && $result->message !== '' ? $result->message : '登录校验成功',
+        );
+    }
 
-            // 创建新令牌，有效期 7 天
-            $token = $this->personalAccessTokenRepository->issueFor($user, now()->addDays(7));
+    /** 校验短信验证码并返回待确认的身份集合，不签发访问令牌。 */
+    public function prepareSmsLogin(string $mobile, string $code): AuthLoginResult
+    {
+        $result = $this->externalAuthClient->prepareSmsLogin($mobile, $code);
+        $this->ensureSuccess($result, '验证码错误或已过期');
 
-            // 更新最后登录时间
-            $this->userRepository->updateLastLoginAt($user);
+        return new AuthLoginResult(
+            $this->normalizePrepareData($result->data),
+            $result->message !== null && $result->message !== '' ? $result->message : '登录校验成功',
+        );
+    }
 
-            // 在事务内完成角色/权限快照，避免提交后序列化失败导致客户端拿不到已签发凭证。
-            $serializedUser = $this->serializeUser($user);
+    /** 选择身份并确认协议，保存上游令牌后返回旧项目登录字段。 */
+    public function confirmLogin(string $ticket, string $memberType, bool $agreementAccepted): AuthLoginResult
+    {
+        $result = $this->externalAuthClient->confirmLogin($ticket, $memberType, $agreementAccepted);
+        $this->ensureSuccess($result, '登录确认失败');
 
-            DB::commit();
+        $data = $this->normalizeTokenData($result->data, $memberType);
+        $token = (string) ($data['token'] ?? '');
+        ResponseHelper::errorIf($token === '', '登录响应缺少访问令牌', ApiCode::ERROR);
+        $user = $this->storedUser($result->data, $data, $memberType);
+        $data['user'] = $user;
 
-            return [
-                'token' => $token->plainTextToken,
-                'token_type' => 'Bearer',
-                'expires_at' => $token->accessToken->expires_at?->toIso8601String(),
-                'user' => $serializedUser,
-            ];
-        } catch (\Throwable $e) {
-            if (DB::transactionLevel() > 0) {
-                DB::rollBack();
-            }
+        $this->authTokenService->store(
+            $token,
+            $user,
+            $data['expires_in'],
+        );
 
-            throw $e;
-        }
+        return new AuthLoginResult(
+            $data,
+            $result->message !== null && $result->message !== '' ? $result->message : '登录成功',
+        );
     }
 
     /**
-     * 获取当前用户信息
+     * 返回当前令牌缓存的用户信息。
+     *
+     * @param  string  $token  上游访问令牌
+     * @return array{user: array<string, mixed>} 当前用户信息
      */
-    public function getCurrentUser(AdminUserModel $user): array
+    public function getCurrentUser(string $token): array
     {
+        return ['user' => $this->authTokenService->currentUser($token)];
+    }
+
+    /**
+     * 清除本地 Redis 中保存的登录令牌。
+     *
+     * @param  string  $token  上游访问令牌
+     * @return void
+     */
+    public function logout(string $token): void
+    {
+        $this->authTokenService->revoke($token);
+    }
+
+    private function ensureSuccess(ExternalAuthResult $result, string $fallbackMessage): void
+    {
+        ResponseHelper::errorIf(
+            ! $result->success,
+            $result->message !== null && $result->message !== '' ? $result->message : $fallbackMessage,
+            $this->resolveApiCode($result->code),
+        );
+    }
+
+    /**
+     * @param  array<string, mixed>  $data
+     * @return array{ticket: string, expires_in: int, member_types: array<int, string>}
+     */
+    private function normalizePrepareData(array $data): array
+    {
+        $ticket = (string) ($data['ticket'] ?? '');
+        $memberTypes = $data['memberTypes'] ?? $data['member_types'] ?? [];
+        $memberTypes = is_array($memberTypes)
+            ? array_values(array_filter(array_map(static fn (mixed $type): string => (string) $type, $memberTypes)))
+            : [];
+
+        ResponseHelper::errorIf($ticket === '', '登录校验响应缺少票据', ApiCode::ERROR);
+
         return [
-            'user' => $this->serializeUser($user),
+            'ticket' => $ticket,
+            'expires_in' => max(
+                1,
+                (int) ($data['expiresIn'] ?? $data['expires_in'] ?? self::DEFAULT_TICKET_TTL_SECONDS),
+            ),
+            'member_types' => $memberTypes,
         ];
     }
 
     /**
-     * 用户登出
-     */
-    public function logout(AdminUserModel $user): void
-    {
-        $this->personalAccessTokenRepository->revokeCurrentFor($user);
-    }
-
-    /**
-     * 按 AuthUser 契约生成脱敏账号数据。
-     *
+     * @param  array<string, mixed>  $data
      * @return array<string, mixed>
      */
-    private function serializeUser(AdminUserModel $user): array
+    private function normalizeTokenData(array $data, string $memberType): array
     {
-        $user = $this->userRepository->loadAuthorizationContext($user);
-        $isSuperAdmin = $user->roles->contains(
-            static fn ($role): bool => (bool) $role->is_super_admin,
+        $token = (string) ($data['accessToken'] ?? $data['access_token'] ?? '');
+        $expiresIn = max(
+            1,
+            (int) ($data['expiresIn']
+                ?? $data['expires_in']
+                ?? config('services.member_auth.token_ttl_seconds', 172800)),
         );
-        $permissions = $user->roles
-            ->flatMap(static fn ($role) => $role->permissions->pluck('code'))
-            ->filter(static fn ($code): bool => is_string($code) && $code !== '')
-            ->unique()
-            ->values()
-            ->all();
-
-        if ($isSuperAdmin && ! in_array('*', $permissions, true)) {
-            array_unshift($permissions, '*');
-        }
 
         return [
-            'id' => $user->id,
-            'username' => $user->username,
-            'phone' => $user->phone,
-            'status' => $user->status->value,
-            'is_super_admin' => $isSuperAdmin,
-            'roles' => $user->roles->pluck('code')->values()->all(),
-            'permissions' => $permissions,
+            'token' => $token,
+            'token_type' => (string) ($data['tokenType'] ?? $data['token_type'] ?? 'Bearer'),
+            'expires_in' => $expiresIn,
+            'refresh_token' => $data['refreshToken'] ?? $data['refresh_token'] ?? null,
+            'member_type' => $memberType,
+            'password_change_required' => $data['passwordChangeRequired'] ?? $data['password_change_required'] ?? null,
+            'password_change_reason' => $data['passwordChangeReason'] ?? $data['password_change_reason'] ?? null,
+            'virtual_login_confirmation_required' => $data['virtualLoginConfirmationRequired']
+                ?? $data['virtual_login_confirmation_required']
+                ?? false,
+            'virtual_login_confirmation_ticket' => $data['virtualLoginConfirmationTicket']
+                ?? $data['virtual_login_confirmation_ticket']
+                ?? null,
+            'virtual_login_confirmation_expires_in' => $data['virtualLoginConfirmationExpiresIn']
+                ?? $data['virtual_login_confirmation_expires_in']
+                ?? null,
+            'user' => is_array($data['user'] ?? null) ? $data['user'] : null,
         ];
+    }
+
+    /**
+     * @param  array<string, mixed>  $externalData
+     * @param  array<string, mixed>  $normalizedData
+     * @return array<string, mixed>
+     */
+    private function storedUser(array $externalData, array $normalizedData, string $memberType): array
+    {
+        $user = $externalData['user'] ?? $externalData['member'] ?? $externalData['memberInfo'] ?? null;
+        if (is_array($user)) {
+            $user['member_type'] ??= $memberType;
+
+            return $user;
+        }
+
+        return Arr::except($normalizedData, ['token', 'refresh_token', 'user', 'token_type', 'expires_in']) + [
+            'member_type' => $memberType,
+        ];
+    }
+
+    private function resolveApiCode(?string $code): ApiCode
+    {
+        return match ($code) {
+            'PARAM_INVALID' => ApiCode::INVALID_PARAMS,
+            'AUTH_FAIL',
+            'SMS_CODE_EXPIRED',
+            'SMS_CODE_INVALID',
+            'SMS_VERIFY_LOCKED',
+            'SMS_IP_LOCKED' => ApiCode::UNAUTHORIZED,
+            'NOT_FOUND' => ApiCode::NOT_FOUND,
+            'BIZ_CONFLICT', 'SMS_TOO_FREQUENT', 'SMS_DAILY_LIMIT', 'TENANT_UNASSIGNED' => ApiCode::CONFLICT,
+            default => ApiCode::ERROR,
+        };
     }
 }

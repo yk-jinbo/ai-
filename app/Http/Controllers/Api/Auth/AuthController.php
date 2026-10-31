@@ -12,6 +12,11 @@ use Spatie\RouteAttributes\Attributes\Get;
 use Spatie\RouteAttributes\Attributes\Post;
 use Spatie\RouteAttributes\Attributes\Prefix;
 
+/**
+ * 会员认证中转控制器。
+ *
+ * 接收旧项目格式请求，调用认证服务并返回统一的 code/message/data 响应。
+ */
 #[Prefix('api/auth')]
 class AuthController extends Controller
 {
@@ -20,56 +25,74 @@ class AuthController extends Controller
         private LoginCaptchaService $loginCaptchaService,
     ) {}
 
-    /**
-     * 获取登录滑块验证码。
-     *
-     * @param  AuthRequest  $request  已完成路由动作校验的请求
-     * @return JsonResponse 滑块背景图、拼图块和布局参数
-     */
     #[Get('captcha', name: 'api.auth.captcha')]
     public function captcha(AuthRequest $request): JsonResponse
     {
         return ResponseHelper::success($this->loginCaptchaService->create()->toArray());
     }
 
-    /**
-     * 用户登录
-     */
-    #[Post('login', name: 'api.auth.login')]
-    public function login(AuthRequest $request): JsonResponse
+    #[Post('sms/send', name: 'api.auth.sms.send')]
+    public function sendSms(AuthRequest $request): JsonResponse
     {
         $data = $request->validated();
-        $result = $this->authService->login(
-            $data['username'],
+
+        $message = $this->authService->sendSms(
+            $data['mobile'],
+            $data['captcha_id'],
+            (int) $data['offset_x'],
+        );
+
+        return ResponseHelper::success(null, $message);
+    }
+
+    #[Post('login/password', name: 'api.auth.login.password')]
+    public function passwordLogin(AuthRequest $request): JsonResponse
+    {
+        $data = $request->validated();
+        $username = (string) ($data['account'] ?? $data['username']);
+        $result = $this->authService->preparePasswordLogin(
+            $username,
             $data['password'],
             $data['captcha_id'],
             (int) $data['offset_x'],
         );
 
-        return ResponseHelper::success($result, '登录成功333');
+        return ResponseHelper::success($result->data, $result->message);
     }
 
-    /**
-     * 获取当前账号信息
-     */
-    #[Get('me', name: 'api.auth.me', middleware: ['auth:sanctum', 'account.status'])]
+    #[Post('login/sms', name: 'api.auth.login.sms')]
+    public function smsLogin(AuthRequest $request): JsonResponse
+    {
+        $data = $request->validated();
+        $result = $this->authService->prepareSmsLogin($data['mobile'], $data['code']);
+
+        return ResponseHelper::success($result->data, $result->message);
+    }
+
+    #[Post('login/confirm', name: 'api.auth.login.confirm')]
+    public function confirmLogin(AuthRequest $request): JsonResponse
+    {
+        $data = $request->validated();
+        $result = $this->authService->confirmLogin(
+            $data['ticket'],
+            $data['member_type'],
+            (bool) $data['agreement_accepted'],
+        );
+
+        return ResponseHelper::success($result->data, $result->message);
+    }
+
+    #[Get('me', name: 'api.auth.me', middleware: 'member.auth')]
     public function me(AuthRequest $request): JsonResponse
     {
-        $user = $request->user();
-        $data = $this->authService->getCurrentUser($user);
-
-        return ResponseHelper::success($data);
+        return ResponseHelper::success($this->authService->getCurrentUser((string) $request->bearerToken()));
     }
 
-    /**
-     * 用户登出
-     */
-    #[Post('logout', name: 'api.auth.logout', middleware: ['auth:sanctum', 'account.status'])]
+    #[Post('logout', name: 'api.auth.logout', middleware: 'member.auth')]
     public function logout(AuthRequest $request): JsonResponse
     {
-        $user = $request->user();
-        $this->authService->logout($user);
+        $this->authService->logout((string) $request->bearerToken());
 
-        return ResponseHelper::success(null, '登出成功');
+        return ResponseHelper::success(null, '退出登录成功');
     }
 }
