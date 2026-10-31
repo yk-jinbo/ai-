@@ -25,7 +25,7 @@ class AuthRequest extends FormRequest
             'passwordLogin' => $this->rulesForPasswordLogin(),
             'smsLogin' => $this->rulesForSmsLogin(),
             'confirmLogin' => $this->rulesForConfirmLogin(),
-            'me', 'logout' => $this->rulesForNoParams(),
+            'logout' => $this->rulesForNoParams(),
             default => throw new LogicException('AuthRequest 未配置当前 Controller 动作的校验规则'),
         };
     }

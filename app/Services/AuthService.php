@@ -95,25 +95,14 @@ class AuthService
     }
 
     /**
-     * 返回当前令牌缓存的用户信息。
-     *
-     * @param  string  $token  上游访问令牌
-     * @return array{user: array<string, mixed>} 当前用户信息
-     */
-    public function getCurrentUser(string $token): array
-    {
-        return ['user' => $this->authTokenService->currentUser($token)];
-    }
-
-    /**
      * 清除本地 Redis 中保存的登录令牌。
      *
      * @param  string  $token  上游访问令牌
      * @return void
      */
-    public function logout(string $token): void
+    public function logout(): void
     {
-        $this->authTokenService->revoke($token);
+        $this->authTokenService->revoke();
     }
 
     private function ensureSuccess(ExternalAuthResult $result, string $fallbackMessage): void

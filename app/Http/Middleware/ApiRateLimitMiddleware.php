@@ -65,7 +65,7 @@ final class ApiRateLimitMiddleware
 
         if ($token !== '') {
             try {
-                $this->authTokenService->currentUser($token);
+                $this->authTokenService->currentUser();
 
                 return 'token:'.$token;
             } catch (AuthenticationException) {

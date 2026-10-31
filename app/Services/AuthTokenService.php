@@ -54,9 +54,9 @@ class AuthTokenService
      *
      * @return array<string, mixed>
      */
-    public function currentUser(string $token): array
+    public function currentUser(): array
     {
-        $token = trim($token);
+        $token = trim((string) request()->bearerToken());
         if ($token === '') {
             throw new AuthenticationException('未认证或令牌无效');
         }
@@ -81,9 +81,9 @@ class AuthTokenService
     }
 
     /** 清除本地保存的令牌及用户信息。 */
-    public function revoke(string $token): void
+    public function revoke(): void
     {
-        $token = trim($token);
+        $token = trim((string) request()->bearerToken());
         if ($token === '') {
             throw new AuthenticationException('未认证或令牌无效');
         }

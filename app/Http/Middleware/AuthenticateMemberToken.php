@@ -29,8 +29,7 @@ class AuthenticateMemberToken
      */
     public function handle(Request $request, Closure $next): Response
     {
-        $token = (string) $request->bearerToken();
-        $request->attributes->set('member_auth_user', $this->authTokenService->currentUser($token));
+        $request->attributes->set('member_auth_user', $this->authTokenService->currentUser());
 
         return $next($request);
     }

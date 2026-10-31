@@ -82,16 +82,10 @@ class AuthController extends Controller
         return ResponseHelper::success($result->data, $result->message);
     }
 
-    #[Get('me', name: 'api.auth.me', middleware: 'member.auth')]
-    public function me(AuthRequest $request): JsonResponse
-    {
-        return ResponseHelper::success($this->authService->getCurrentUser((string) $request->bearerToken()));
-    }
-
     #[Post('logout', name: 'api.auth.logout', middleware: 'member.auth')]
     public function logout(AuthRequest $request): JsonResponse
     {
-        $this->authService->logout((string) $request->bearerToken());
+        $this->authService->logout();
 
         return ResponseHelper::success(null, '退出登录成功');
     }
