@@ -61,6 +61,10 @@ return [
         'url' => $thirdParty['assessment']['business_types'],
     ],
 
+    'assessment_info' => [
+        'urls' => $thirdParty['assessment']['info'],
+    ],
+
     'member_auth' => [
         // 保留既有配置键，认证客户端和旧调用方均读取新身份网关。
         'base_url' => $identityGateway,
