@@ -120,7 +120,7 @@ class RelationService
 
 //        return $data;
         $items = [];
-        foreach ($data['items'] as $item) {
+        foreach ($data['items'] ?? [] as $item) {
             $items[] = [
                 'mobile' => $item['member']['mobile'] ?? '',
 //                'team_member_id' => 74,
@@ -132,9 +132,10 @@ class RelationService
             ];
         }
 
+        // 处理数据
         foreach ($items as $index => $fan) {
             // 按 UTF-8 字符截取，避免中文名称的首字被拆成无效字节。
-            $items[$index]['member_name_abbr'] = mb_substr($fan['member_name'], 0, 1, 'UTF-8');
+            $items[$index]['fan_name_abbr'] = mb_substr($fan['fan_name'], 0, 1, 'UTF-8');
 
         }
 
