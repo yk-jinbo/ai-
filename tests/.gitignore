@@ -5,3 +5,5 @@
 !Feature/ExternalHttp/*Test.php
 !Feature/Auth/
 !Feature/Auth/*Test.php
+!Deployment/
+!Deployment/test_*.py

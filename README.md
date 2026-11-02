@@ -26,3 +26,7 @@ docker compose -f docker-compose.image.yml exec -T app tail -n 80 storage/logs/l
 
 重点区分 `Target class ... does not exist`（源码漏交）、`滑块验证码背景资源不存在`（图片漏交）与 Redis/缓存配置错误。
 `external-http` 日志用于外部请求失败，不包含本地验证码生成的异常。
+
+## 测试环境自动部署
+
+Webhook、Git 拉取重试、部署状态查询和失败重投说明见 [测试环境自动部署](docs/deployment-test.md)。对应运维脚本维护于 `scripts/deployment/`。
