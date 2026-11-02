@@ -1,2 +1,5 @@
 *
 !.gitignore
+!Feature/
+!Feature/ExternalHttp/
+!Feature/ExternalHttp/*Test.php

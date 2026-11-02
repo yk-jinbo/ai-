@@ -829,6 +829,18 @@ enum UserStatus: string
 - **安全**：适配层逻辑 key 结构为 `namespace:version:scope:HMAC-SHA256(identifier)`；直接 Redis 的后端前缀来自 `REDIS_PREFIX`，`CACHE_PREFIX` 不作用于此路径。缓存值不等于加密；不记录原始标识、token 或值。
 - **配置**：`config/cache.php` 的 `redis_connection`、`namespace`、`version`、`hash_key` 分别对应 `CACHE_REDIS_CONNECTION`、`CACHE_NAMESPACE`、`CACHE_VERSION`、`CACHE_HASH_KEY`；hash key 未设置时回退 `APP_KEY`。
 
+### 4.8 外部 HTTP 请求
+
+- 所有新增外部 HTTP 调用统一注入 `App\Services\ExternalHttpClient`，使用其 `get()`、`post()` 或 `request()`；业务代码不直接使用 `Http::` 发请求。
+- `HttpExternalAuthClient` 只承载认证接口；其他业务可在对应 Service/客户端中复用通用请求层，不依赖认证客户端。
+- **网关分流**：登录认证（含登录短信、密码/验证码登录、身份确认）和数证使用 `ExternalGateway::IDENTITY`，由 `IDENTITY_GATEWAY_BASE_URL` 配置，默认 `http://101.200.147.55:18080`；其他业务默认 `ExternalGateway::DEFAULT`，使用原网关。
+- **原网关兼容**：`EXTERNAL_HTTP_BASE_URL` 未设置时回退到旧 `MEMBER_AUTH_BASE_URL`；旧变量原值保留，不要改成身份网关。显式配置空值会报配置错误，不自动切换到另一网关。
+- **新调用写法**：传网关内的相对路径（包含上游模块/API 前缀），由通用层选择并拼接网关；数证必须显式传 `gateway: ExternalGateway::IDENTITY`。既有完整 URL 调用保持目标地址不变，`service` 只用于日志区分，不负责路由选择。
+- 上游包含业务状态码时，调用方必须提供 `isSuccessful` 判断规则（例如认证 `code=OK`）；未提供时只判断 HTTP 2xx，无法识别 HTTP 200 的业务失败。
+- 通用层负责请求 ID、超时、失败分类和脱敏日志；业务代码不重复写同一次外部调用的失败日志。成功调用不记日志。
+- 连接/配置/判断规则异常在记录后继续抛出；HTTP/业务失败返回原始 Response，由 Service 决定如何转换为本项目响应。
+- 使用说明、配置和示例见 `docs/architecture/08_外部接口调用与日志.md`。
+
 ## 5. 路由规范
 
 1. **业务路由一律使用注解路由**，写在 Controller 方法上；`routes/api.php` 只放全局/兜底路由（如 `GET /api/health`）。⚠️ 路由扫描配置在 `config/route-attributes.php`，**仅扫描 `app/Http/Controllers/Api/` 目录下以 `*Controller.php` 结尾的文件**——新控制器必须放在 `app/Http/Controllers/Api/` 下才会生效。

@@ -80,11 +80,11 @@ return [
             'replace_placeholders' => true,
         ],
 
-        'external_auth' => [
+        'external_http' => [
             'driver' => 'daily',
-            'path' => storage_path('logs/external-auth.log'),
-            'level' => env('EXTERNAL_AUTH_LOG_LEVEL', 'warning'),
-            'days' => env('EXTERNAL_AUTH_LOG_DAYS', 30),
+            'path' => storage_path('logs/external-http.log'),
+            'level' => env('EXTERNAL_HTTP_LOG_LEVEL', env('EXTERNAL_AUTH_LOG_LEVEL', 'warning')),
+            'days' => env('EXTERNAL_HTTP_LOG_DAYS', env('EXTERNAL_AUTH_LOG_DAYS', 30)),
             'replace_placeholders' => true,
         ],
 
