@@ -16,7 +16,7 @@ class LoginCaptchaService
 
     private const TTL_SECONDS = 120;
 
-    private const OFFSET_TOLERANCE_PIXELS = 150000;
+    private const OFFSET_TOLERANCE_PIXELS = 15;
 
     private const CONSUME_LUA = <<<'LUA'
 local payload = redis.call('GET', KEYS[1])
