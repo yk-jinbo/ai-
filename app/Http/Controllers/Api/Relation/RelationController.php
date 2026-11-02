@@ -94,8 +94,10 @@ class RelationController extends Controller
     #[Get('exchange-statistics-list', name: 'api.relation.exchange-statistics-list')]
     public function exchangeStatisticsList(RelationRequest $request): JsonResponse
     {
+        $data = $request->validated();
+
         return ResponseHelper::success(
-            $this->relationService->getExchangeStatisticsList(),
+            $this->relationService->getExchangeStatisticsList($data['start_date'], $data['end_date']),
             '团队兑换额记录获取成功',
         );
     }
