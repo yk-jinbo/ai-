@@ -5,6 +5,7 @@ namespace Tests\Feature\ExternalHttp;
 use App\Enums\ExternalGateway;
 use App\Services\ExternalAuthClient;
 use App\Services\ExternalHttpClient;
+use App\Services\RelationService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Http\Client\ConnectionException;
 use Illuminate\Http\Client\Request as ClientRequest;
@@ -75,6 +76,49 @@ class ExternalHttpClientTest extends TestCase
         Http::assertSent(fn (ClientRequest $request): bool => $request->method() === 'PATCH' && $request['status'] === 'closed');
         Http::assertSent(fn (ClientRequest $request): bool => $request->hasHeader('Authorization', 'Bearer outbound-secret') && $request->hasHeader('X-Request-Id', 'test-request-123'));
         $this->assertSame([], $this->handler->getRecords());
+    }
+
+    /** 验证团队统计使用关系汇总接口的 JSON 契约并返回上游 data。 */
+    public function test_relation_team_statistics_uses_upstream_summary(): void
+    {
+        config()->set('services.external_http.gateways.default', 'http://192.168.11.202:8082');
+        Http::fake(['*' => Http::response(['code' => 'OK', 'data' => ['memberCount' => 12]])]);
+
+        $statistics = $this->app->make(RelationService::class)->getTeamStatistics();
+
+        $this->assertSame(['memberCount' => 12], $statistics);
+        Http::assertSent(function (ClientRequest $request): bool {
+            return $request->method() === 'POST'
+                && $request->url() === 'http://192.168.11.202:8082/api/v1/computing/query/relations/summary'
+                && $request['tenantId'] === 'demo'
+                && $request['mobile'] === '13800000002'
+                && $request['memberType'] === 'NORMAL'
+                && $request['asOfDate'] === '2026-10-27'
+                && $request['relationType'] === 'DIRECT';
+        });
+    }
+
+    /** 验证团队列表将本地分页参数传给关系详情接口并返回上游 data。 */
+    public function test_relation_team_list_uses_upstream_details(): void
+    {
+        config()->set('services.external_http.gateways.default', 'http://192.168.11.202:8082');
+        $upstreamData = ['records' => [['mobile' => '13800000001']], 'total' => 1];
+        Http::fake(['*' => Http::response(['code' => 'OK', 'data' => $upstreamData])]);
+
+        $result = $this->app->make(RelationService::class)->getTeamList(1, 10);
+
+        $this->assertSame($upstreamData, $result);
+        Http::assertSent(function (ClientRequest $request): bool {
+            return $request->method() === 'POST'
+                && $request->url() === 'http://192.168.11.202:8082/api/v1/computing/query/relations/details'
+                && $request['tenantId'] === 'demo'
+                && $request['mobile'] === '13800000002'
+                && $request['memberType'] === 'NORMAL'
+                && $request['asOfDate'] === '2026-10-27'
+                && $request['relationType'] === 'NETWORK'
+                && $request['pageNo'] === 1
+                && $request['pageSize'] === 10;
+        });
     }
 
     /** 验证 HTTP 错误只记录一次，保留上游状态、业务码和追踪标识。 */

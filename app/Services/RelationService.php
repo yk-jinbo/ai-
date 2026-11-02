@@ -2,12 +2,26 @@
 
 namespace App\Services;
 
+use Illuminate\Http\Client\Response;
+use RuntimeException;
+
 /**
  * 关系 Demo 业务服务。
  * 负责提供关系模块固定示例数据，后续可替换为真实 Repository 查询。
  */
 class RelationService
 {
+    private const RELATION_SUMMARY_ENDPOINT = 'api/v1/computing/query/relations/summary';
+    private const RELATION_RELATIONS_DETAILS = '/api/v1/computing/query/relations/details';
+
+    /**
+     * 注入统一外部 HTTP 客户端。
+     *
+     * @param  ExternalHttpClient  $http  统一外部请求客户端
+     * @return void
+     */
+    public function __construct(private ExternalHttpClient $http) {}
+
     /**
      * 获取会员当日粉丝统计示例数据。
      *
@@ -15,16 +29,58 @@ class RelationService
      */
     public function getFansStatistics(): array
     {
+        $todayDay = date('Y-m-d');
+        $relations_response = $this->http->post(
+            url: self::RELATION_RELATIONS_DETAILS,
+            data: [
+                "tenantId" => "demo",
+                "mobile" => "13800000002",
+                "memberType" => "NORMAL",
+                "asOfDate" => $todayDay,
+                "relationType" => "DIRECT",
+                "pageNo" => 1,
+                "pageSize" => 1
+            ],
+            isSuccessful: static fn (Response $relations_response): bool => $relations_response->successful(),
+            service: 'relations_details',
+        );
+
+        $relations_data = $relations_response->json('data');
+        if (! is_array($relations_data)) {
+            throw new RuntimeException('关系详情接口未返回有效数据');
+        }
+
+        $summary_response = $this->http->post(
+            url: self::RELATION_SUMMARY_ENDPOINT,
+            data: [
+                "tenantId" => "demo",
+                "mobile" => "13800000002",
+                "memberType" => "NORMAL",
+                "asOfDate" => $todayDay,
+                "relationType" => "DIRECT"
+            ],
+            isSuccessful: static fn (Response $summary_response): bool => $summary_response->successful(),
+            service: 'relations_summary',
+        );
+
+        $summary_data = $summary_response->json('data');
+        if (! is_array($summary_data)) {
+            throw new RuntimeException('关系汇总接口未返回有效数据');
+        }
+
+
+//        return [
+//           'summary' => $summary_data,
+//           'relations' => $relations_data,
+//        ];
         return [
-            'mobile' => '15200000010',
-            'parent_mobile' => '',
+            'mobile' => '13800000002',
+            'parent_mobile' => $summary_data['parentMobile'] ?? '',
             'today_fans_count' => 0,
-            'total_fans_count' => 11,
-            'today_gcp_income' => 0,
-            'total_gcp_income' => 1000,
-            'new_fans_count' => 0,
-            'active_fans_count' => 11,
-            'created_at' => '2026-10-28 10:17:00',
+            'total_fans_count' => $summary_data['memberCount'] ?? '0',
+            'my_exchange' => $relations_data['userDailyExchangeAmount'] ?? '0.00',
+            'fans_exchange' => $relations_data['relatedDailyExchangeAmount'] ?? '0.00',
+            'date_at' => $todayDay,
         ];
     }
 
@@ -39,35 +95,50 @@ class RelationService
      */
     public function getFansList(int $page, int $pagesize): array
     {
-        $items = [
-            [
-                'mobile' => '*******0010',
-                'fan_id' => 59,
-                'fan_name' => '直推-10',
-                'fan_avatar' => '111.jpg',
-                'joined_at' => '2026-09-09 15:00:00',
-                'today_active' => 0,
-                'level_title' => '秦',
-                'active_count' => 5,
+
+        $todayDay = date('Y-m-d');
+        $response = $this->http->post(
+            url: self::RELATION_RELATIONS_DETAILS,
+            data: [
+                'tenantId' => 'demo',
+                'mobile' => '13800000002',
+                'memberType' => 'NORMAL',
+                'asOfDate' => $todayDay,
+//                'asOfDate' => '2026-10-27',
+                'relationType' => 'DIRECT',
+                'pageNo' => $page,
+                'pageSize' => $pagesize,
             ],
-            [
-                'mobile' => '*******0009',
-                'fan_id' => 58,
-                'fan_name' => '直推-9',
-                'fan_avatar' => '111.jpg',
-                'joined_at' => '2026-09-09 15:00:00',
-                'today_active' => 0,
-                'level_title' => '秦',
-                'active_count' => 0,
-            ],
-        ];
+            isSuccessful: static fn (Response $response): bool => $response->successful(),
+            service: 'relations_details',
+        );
+
+        $data = $response->json('data');
+        if (! is_array($data)) {
+            throw new RuntimeException('关系详情接口未返回有效数据');
+        }
+
+//        return $data;
+        $items = [];
+        foreach ($data['items'] as $item) {
+            $items[] = [
+                'mobile' => $item['member']['mobile'] ?? '',
+//                'team_member_id' => 74,
+                'fan_name' => $item['member']['memberName'] ?? '',
+                'level_title' => $item['member']['memberLevel'] ?? '',
+//                'member_avatar' => '111.jpg',
+                'today_active' => $item['userDailyExchangeAmount'] ?? '0.00',
+                'active_count' => $item['directMemberCount'] ?? '0',
+            ];
+        }
 
         foreach ($items as $index => $fan) {
             // 按 UTF-8 字符截取，避免中文名称的首字被拆成无效字节。
-            $items[$index]['fan_name_abbr'] = mb_substr($fan['fan_name'], 0, 1, 'UTF-8');
+            $items[$index]['member_name_abbr'] = mb_substr($fan['member_name'], 0, 1, 'UTF-8');
+
         }
 
-        return $this->paginate($items, 11, $page, $pagesize);
+        return $this->paginate($items, 22, $page, $pagesize);
     }
 
     /**
@@ -79,50 +150,109 @@ class RelationService
      */
     public function getTeamList(int $page, int $pagesize): array
     {
-        $items = [
-            [
-                'mobile' => '*******2194',
-                'team_member_id' => 74,
-                'member_name' => 'jiyang-74',
-                'member_avatar' => '111.jpg',
-                'joined_at' => '2026-09-09 16:47:37',
-                'today_exchange_amount' => 0,
-                'total_exchange_amount' => 0,
+        $todayDay = date('Y-m-d');
+        $response = $this->http->post(
+            url: self::RELATION_RELATIONS_DETAILS,
+            data: [
+                'tenantId' => 'demo',
+                'mobile' => '13800000002',
+                'memberType' => 'NORMAL',
+                'asOfDate' => $todayDay,
+//                'asOfDate' => '2026-10-27',
+                'relationType' => 'NETWORK',
+                'pageNo' => $page,
+                'pageSize' => $pagesize,
             ],
-            [
-                'mobile' => '*******0020',
-                'team_member_id' => 79,
-                'member_name' => '直推-20',
-                'member_avatar' => '111.jpg',
-                'joined_at' => '2026-09-09 15:00:00',
-                'today_exchange_amount' => 0,
-                'total_exchange_amount' => 0,
-            ],
-        ];
+            isSuccessful: static fn (Response $response): bool => $response->successful(),
+            service: 'relations_details',
+        );
+
+        $data = $response->json('data');
+        if (! is_array($data)) {
+            throw new RuntimeException('关系详情接口未返回有效数据');
+        }
+
+//        return $data;
+        $items = [];
+        foreach ($data['items'] as $item) {
+            $items[] = [
+                'mobile' => $item['member']['mobile'] ?? '',
+//                'team_member_id' => 74,
+                'member_name' => $item['member']['memberName'] ?? '',
+//                'member_avatar' => '111.jpg',
+                'today_exchange_amount' => $item['userDailyExchangeAmount'] ?? '0.00',
+                'total_exchange_amount' => $itme['memberDailyExchangeAmount'] ?? '0.00',
+            ];
+        }
 
         foreach ($items as $index => $fan) {
             // 按 UTF-8 字符截取，避免中文名称的首字被拆成无效字节。
             $items[$index]['member_name_abbr'] = mb_substr($fan['member_name'], 0, 1, 'UTF-8');
+
         }
 
         return $this->paginate($items, 22, $page, $pagesize);
     }
 
     /**
-     * 获取团队当日统计示例数据。
+     * 获取团队统计数据。
      *
-     * @return array<string, int|string> 团队统计数据
+     * 业务逻辑：按关系汇总接口契约请求默认业务网关，并返回上游数据。
+     *
+     * @return array<string, mixed> 上游返回的团队统计数据
+     *
+     * @throws RuntimeException 上游请求失败或未返回数据时抛出
      */
     public function getTeamStatistics(): array
     {
+        $todayDay = date('Y-m-d');
+        $relations_response = $this->http->post(
+            url: self::RELATION_RELATIONS_DETAILS,
+            data: [
+                "tenantId" => "demo",
+                "mobile" => "13800000002",
+                "memberType" => "NORMAL",
+                "asOfDate" => $todayDay,
+                "relationType" => "NETWORK",
+                "pageNo" => 1,
+                "pageSize" => 1
+            ],
+            isSuccessful: static fn (Response $relations_response): bool => $relations_response->successful(),
+            service: 'relations_details',
+        );
+
+        $relations_data = $relations_response->json('data');
+        if (! is_array($relations_data)) {
+            throw new RuntimeException('关系详情接口未返回有效数据');
+        }
+
+        $summary_response = $this->http->post(
+            url: self::RELATION_SUMMARY_ENDPOINT,
+            data: [
+                "tenantId" => "demo",
+                "mobile" => "13800000002",
+                "memberType" => "NORMAL",
+                "asOfDate" => $todayDay,
+                "relationType" => "NETWORK"
+            ],
+            isSuccessful: static fn (Response $summary_response): bool => $summary_response->successful(),
+            service: 'relations_summary',
+        );
+
+        $summary_data = $summary_response->json('data');
+        if (! is_array($summary_data)) {
+            throw new RuntimeException('关系汇总接口未返回有效数据');
+        }
+
+//        return $data;
         return [
-            'member_id' => 40,
-            'mobile' => '15200000010',
-            'today_team_member_count' => 40,
-            'today_team_trade_amount' => 0,
-            'today_team_reward_amount' => 0,
-            'active_team_count' => 40,
-            'created_at' => '2026-10-28 10:18:57',
+//            'member_id' => 40,
+            'mobile' => '13800000002',
+            'today_team_member_count' => $relations_data['totalExchangeAmount'] ?? '0.00',
+            'today_team_trade_amount' => $relations_data['maxExchangeAmount'] ?? '0.00',
+            'today_team_reward_amount' => $relations_data['remainingExchangeAmount'] ?? '0.00',
+            'active_team_count' => $summary_data['memberCount'] ?? '0',
+            'data_at' => $todayDay,
         ];
     }
 
