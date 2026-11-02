@@ -48,14 +48,6 @@ class CertificateRequest extends FormRequest
         ];
     }
 
-    protected function prepareForValidation(): void
-    {
-        $certType = $this->route('certType');
-        if ($certType !== null) {
-            $this->merge(['certType' => $certType]);
-        }
-    }
-
     private function controllerAction(): string
     {
         return (string) $this->route()?->getActionMethod();

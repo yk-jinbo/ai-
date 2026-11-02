@@ -24,7 +24,7 @@ class MemberCertificateController extends Controller
         return $this->respond($this->certificateService->list((string) $request->bearerToken()));
     }
 
-    #[Get('/list/{certType}', name: 'api.certificate.member.list-by-type')]
+    #[Get('/list-by-type', name: 'api.certificate.member.list-by-type')]
     public function listByType(CertificateRequest $request): JsonResponse
     {
         $data = $request->validated();
