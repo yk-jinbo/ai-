@@ -115,7 +115,8 @@ class ExternalHttpLogger
                 $safeFields[$key] = $this->text($value);
             }
             if (in_array($key, ['username', 'mobile'], true) && is_string($value)) {
-                $safeFields[$key] = mb_strlen($value) > 7 ? Str::mask($value, '*', 3, mb_strlen($value) - 7) : '[REDACTED]';
+                $length = function_exists('mb_strlen') ? mb_strlen($value) : strlen($value);
+                $safeFields[$key] = $length > 7 ? Str::mask($value, '*', 3, $length - 7) : '[REDACTED]';
             }
         }
 
@@ -176,7 +177,11 @@ class ExternalHttpLogger
         ];
         $text = preg_replace(array_keys($patterns), array_values($patterns), $text) ?? '[REDACTED]';
 
-        return mb_strcut($text, 0, self::MAX_TEXT_BYTES, 'UTF-8');
+        if (function_exists('mb_strcut')) {
+            return mb_strcut($text, 0, self::MAX_TEXT_BYTES, 'UTF-8');
+        }
+
+        return substr($text, 0, self::MAX_TEXT_BYTES);
     }
 
     /** @param array<string, mixed> $request @param list<string> $secrets */

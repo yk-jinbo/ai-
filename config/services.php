@@ -3,6 +3,7 @@
 // 旧变量保留给原业务网关；登录和数证独立配置，避免切换时影响其他接口。
 $legacyGateway = env('MEMBER_AUTH_BASE_URL');
 $identityGateway = env('IDENTITY_GATEWAY_BASE_URL', 'http://101.200.147.55:18080');
+$thirdParty = require __DIR__.'/third_party.php';
 
 return [
 
@@ -46,6 +47,14 @@ return [
         ],
         'connect_timeout' => (int) env('EXTERNAL_HTTP_CONNECT_TIMEOUT_SECONDS', 3),
         'timeout' => (int) env('EXTERNAL_HTTP_TIMEOUT_SECONDS', 10),
+    ],
+
+    'asset_summary' => [
+        'url' => $thirdParty['assets']['summary'],
+    ],
+
+    'asset_records' => [
+        'url' => $thirdParty['assets']['records'],
     ],
 
     'member_auth' => [
