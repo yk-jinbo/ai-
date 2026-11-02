@@ -51,9 +51,15 @@ class AuthService
         $this->loginCaptchaService->verify($captchaId, $offsetX);
         $result = $this->externalAuthClient->preparePasswordLogin($username, $password);
         $this->ensureSuccess($result, '账号或密码错误');
+        $data = $this->normalizePrepareData($result->data);
+        $this->rememberPendingMobile(
+            $data['ticket'],
+            $this->resolveLoginMobile($username),
+            $data['expires_in'],
+        );
 
         return new AuthLoginResult(
-            $this->normalizePrepareData($result->data),
+            $data,
             $result->message !== null && $result->message !== '' ? $result->message : '登录校验成功',
         );
     }
@@ -63,9 +69,11 @@ class AuthService
     {
         $result = $this->externalAuthClient->prepareSmsLogin($mobile, $code);
         $this->ensureSuccess($result, '验证码错误或已过期');
+        $data = $this->normalizePrepareData($result->data);
+        $this->rememberPendingMobile($data['ticket'], $mobile, $data['expires_in']);
 
         return new AuthLoginResult(
-            $this->normalizePrepareData($result->data),
+            $data,
             $result->message !== null && $result->message !== '' ? $result->message : '登录校验成功',
         );
     }
@@ -73,13 +81,14 @@ class AuthService
     /** 选择身份并确认协议，保存上游令牌后返回旧项目登录字段。 */
     public function confirmLogin(string $ticket, string $memberType, bool $agreementAccepted): AuthLoginResult
     {
+        $pendingMobile = $this->authTokenService->pendingMobile($ticket);
         $result = $this->externalAuthClient->confirmLogin($ticket, $memberType, $agreementAccepted);
         $this->ensureSuccess($result, '登录确认失败');
 
         $data = $this->normalizeTokenData($result->data, $memberType);
         $token = (string) ($data['token'] ?? '');
         ResponseHelper::errorIf($token === '', '登录响应缺少访问令牌', ApiCode::ERROR);
-        $user = $this->storedUser($result->data, $data, $memberType);
+        $user = $this->storedUser($result->data, $data, $memberType, $pendingMobile);
         $data['user'] = $user;
 
         $this->authTokenService->store(
@@ -87,6 +96,7 @@ class AuthService
             $user,
             $data['expires_in'],
         );
+        $this->authTokenService->forgetPendingMobile($ticket);
 
         return new AuthLoginResult(
             $data,
@@ -178,18 +188,49 @@ class AuthService
      * @param  array<string, mixed>  $normalizedData
      * @return array<string, mixed>
      */
-    private function storedUser(array $externalData, array $normalizedData, string $memberType): array
+    private function storedUser(
+        array $externalData,
+        array $normalizedData,
+        string $memberType,
+        ?string $pendingMobile = null,
+    ): array
     {
-        $user = $externalData['user'] ?? $externalData['member'] ?? $externalData['memberInfo'] ?? null;
+        $user = $externalData['user']
+            ?? $externalData['member']
+            ?? $externalData['memberInfo']
+            ?? $externalData['userInfo']
+            ?? null;
         if (is_array($user)) {
+            if ($pendingMobile !== null) {
+                $user['mobile'] = $pendingMobile;
+            }
             $user['member_type'] ??= $memberType;
 
             return $user;
         }
 
-        return Arr::except($normalizedData, ['token', 'refresh_token', 'user', 'token_type', 'expires_in']) + [
+        $storedUser = Arr::except($normalizedData, ['token', 'refresh_token', 'user', 'token_type', 'expires_in']) + [
             'member_type' => $memberType,
         ];
+        if ($pendingMobile !== null) {
+            $storedUser['mobile'] = $pendingMobile;
+        }
+
+        return $storedUser;
+    }
+
+    private function rememberPendingMobile(string $ticket, ?string $mobile, int $expiresIn): void
+    {
+        if ($mobile !== null && $mobile !== '') {
+            $this->authTokenService->storePendingMobile($ticket, $mobile, $expiresIn);
+        }
+    }
+
+    private function resolveLoginMobile(string $username): ?string
+    {
+        $username = trim($username);
+
+        return preg_match('/^1[3-9]\d{9}$/', $username) === 1 ? $username : null;
     }
 
     private function resolveApiCode(?string $code): ApiCode

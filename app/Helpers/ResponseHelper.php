@@ -21,10 +21,16 @@ class ResponseHelper
         ApiCode|int $code = ApiCode::SUCCESS,
         int $httpStatus = 200,
         int $encodingOptions = 0,
+        array $extra = [],
     ): JsonResponse {
         $code = self::codeValue($code);
 
-        return new JsonResponse(compact('code', 'message', 'data'), $httpStatus, [], $encodingOptions);
+        return new JsonResponse(
+            array_merge($extra, compact('code', 'message', 'data')),
+            $httpStatus,
+            [],
+            $encodingOptions,
+        );
     }
 
     /**

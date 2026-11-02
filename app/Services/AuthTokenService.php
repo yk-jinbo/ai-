@@ -11,12 +11,15 @@ use JsonException;
  * 外部会员令牌的本地 Redis 适配器。
  *
  * 上游 accessToken 作为登录标识使用，本地只保存它对应的用户信息和过期时间，不生成数据库令牌。
+ * 身份确认前的手机号也按短期票据暂存于独立 Redis 作用域，确认成功后立即清理。
  */
 class AuthTokenService
 {
     private const CACHE_SCOPE = 'auth-tokens';
 
     private const LONG_TOKEN_CACHE_SCOPE = 'auth-token-digests';
+
+    private const PENDING_LOGIN_CACHE_SCOPE = 'auth-login-pending';
 
     private const MAX_TOKEN_IDENTIFIER_BYTES = 256;
 
@@ -52,6 +55,68 @@ class AuthTokenService
         if ($stored === false) {
             throw new \RuntimeException('登录信息缓存失败');
         }
+    }
+
+    /**
+     * 暂存登录校验阶段的手机号，供身份确认成功后写入用户信息。
+     *
+     * @param  string  $ticket  上游登录校验票据
+     * @param  string  $mobile  登录手机号
+     * @param  int  $expiresIn  票据剩余有效秒数
+     */
+    public function storePendingMobile(string $ticket, string $mobile, int $expiresIn): void
+    {
+        $ticket = trim($ticket);
+        $mobile = trim($mobile);
+        if ($ticket === '' || $mobile === '') {
+            throw new \InvalidArgumentException('登录票据和手机号不能为空');
+        }
+
+        $scope = $this->cacheManager->scope(self::PENDING_LOGIN_CACHE_SCOPE);
+        $stored = $scope->connection()->setex(
+            $scope->key($this->boundedIdentifier($ticket)),
+            max(1, $expiresIn),
+            $mobile,
+        );
+
+        if ($stored === false) {
+            throw new \RuntimeException('登录手机号缓存失败');
+        }
+    }
+
+    /**
+     * 获取登录确认阶段暂存的手机号。
+     *
+     * @param  string  $ticket  上游登录校验票据
+     * @return string|null 暂存手机号，不存在或已过期时返回 null
+     */
+    public function pendingMobile(string $ticket): ?string
+    {
+        $ticket = trim($ticket);
+        if ($ticket === '') {
+            return null;
+        }
+
+        $scope = $this->cacheManager->scope(self::PENDING_LOGIN_CACHE_SCOPE);
+        $mobile = $scope->connection()->get($scope->key($this->boundedIdentifier($ticket)));
+
+        return is_string($mobile) && $mobile !== '' ? $mobile : null;
+    }
+
+    /**
+     * 清理已完成登录确认的手机号暂存。
+     *
+     * @param  string  $ticket  上游登录校验票据
+     */
+    public function forgetPendingMobile(string $ticket): void
+    {
+        $ticket = trim($ticket);
+        if ($ticket === '') {
+            return;
+        }
+
+        $scope = $this->cacheManager->scope(self::PENDING_LOGIN_CACHE_SCOPE);
+        $scope->connection()->del($scope->key($this->boundedIdentifier($ticket)));
     }
 
     /**
@@ -111,11 +176,16 @@ class AuthTokenService
 
     private function tokenIdentifier(string $token): string
     {
-        if (strlen($token) <= self::MAX_TOKEN_IDENTIFIER_BYTES) {
-            return $token;
+        return $this->boundedIdentifier($token);
+    }
+
+    private function boundedIdentifier(string $identifier): string
+    {
+        if (strlen($identifier) <= self::MAX_TOKEN_IDENTIFIER_BYTES) {
+            return $identifier;
         }
 
-        // JWT 可能超过缓存标识的 256 字节限制；只摘要长令牌，兼容已缓存短令牌的 key。
-        return self::TOKEN_HASH_ALGORITHM.':'.hash(self::TOKEN_HASH_ALGORITHM, $token);
+        // JWT 或票据可能超过缓存标识限制；只摘要长标识，避免把原文放入 Redis key。
+        return self::TOKEN_HASH_ALGORITHM.':'.hash(self::TOKEN_HASH_ALGORITHM, $identifier);
     }
 }

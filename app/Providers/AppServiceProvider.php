@@ -6,6 +6,8 @@ use App\Caches\CacheManager;
 use App\Models\AdminPersonalAccessTokenModel;
 use App\Services\ExternalAuthClient;
 use App\Services\HttpExternalAuthClient;
+use App\Services\CertificateClient;
+use App\Services\HttpCertificateClient;
 use Illuminate\Contracts\Redis\Factory;
 use Illuminate\Foundation\Application;
 use Illuminate\Support\ServiceProvider;
@@ -21,6 +23,7 @@ class AppServiceProvider extends ServiceProvider
     public function register(): void
     {
         $this->app->bind(ExternalAuthClient::class, HttpExternalAuthClient::class);
+        $this->app->bind(CertificateClient::class, HttpCertificateClient::class);
 
         $this->app->singleton(CacheManager::class, static function (Application $app): CacheManager {
             return new CacheManager(
