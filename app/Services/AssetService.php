@@ -25,6 +25,12 @@ class AssetService
         'memberType' => 'NORMAL',
     ];
 
+    private const RECORDS_TEST_PARAMETERS = [
+        'tenantId' => 'demo',
+        'mobile' => '13800000002',
+        'memberType' => 'NORMAL',
+    ];
+
     /**
      * 注入通用外部请求客户端
      *
@@ -108,19 +114,18 @@ class AssetService
     /**
      * 查询并组装会员资产流水
      *
-     * 业务逻辑：组合 Token 用户信息、日期范围、分页和可选筛选项，查询第三方资产流水。
+     * 业务逻辑：组合联调身份、日期范围、分页和可选筛选项，查询第三方资产流水。
      *
-     * @param  array<string, mixed>  $member  Token 对应的登录会员信息
      * @param  array<string, mixed>  $filters  已校验的资产流水筛选条件
      * @return Collection<string, mixed> 标准化资产余额、流水和分页数据
      *
      * @throws \Throwable 第三方接口不可用、业务失败或响应格式异常时抛出
      */
-    public function records(array $member, array $filters): Collection
+    public function records(array $filters): Collection
     {
         $response = $this->http->post(
             url: (string) config('services.asset_records.url'),
-            data: $this->recordsUpstreamParameters($member, $filters),
+            data: $this->recordsUpstreamParameters($filters),
             isSuccessful: fn (Response $response): bool => $this->isSuccessful($response),
             service: 'asset_records',
         );
@@ -131,15 +136,13 @@ class AssetService
     /**
      * 组装第三方资产流水查询参数
      *
-     * @param  array<string, mixed>  $member  Token 对应的登录会员信息
      * @param  array<string, mixed>  $filters  已校验的资产流水筛选条件
      * @return array<string, int|string> 第三方资产流水查询参数
      *
-     * @throws \Exception 登录会员信息不完整时抛出
      */
-    private function recordsUpstreamParameters(array $member, array $filters): array
+    private function recordsUpstreamParameters(array $filters): array
     {
-        $parameters = $this->memberParameters($member);
+        $parameters = self::RECORDS_TEST_PARAMETERS;
         $parameters['fromDate'] = (string) $filters['fromDate'];
         $parameters['toDate'] = (string) $filters['toDate'];
         $parameters['pageNo'] = (int) ($filters['pageNo'] ?? self::DEFAULT_PAGE_NO);

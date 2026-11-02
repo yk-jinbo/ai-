@@ -59,14 +59,11 @@ class AssetController extends Controller
      *
      * @throws \Throwable 第三方接口不可用、业务失败或响应格式异常时向上抛出
      */
-    #[Post('/assets/records', name: 'api.assets.records', middleware: 'member.auth')]
+    #[Post('/assets/records', name: 'api.assets.records')]
     public function records(AssetRequest $request): JsonResponse
     {
-        /** @var array<string, mixed> $member */
-        $member = $request->attributes->get('member_auth_user');
-
         return ResponseHelper::success(
-            $this->assetService->records($member, $request->validated()),
+            $this->assetService->records($request->validated()),
             '资产流水查询成功',
         );
     }

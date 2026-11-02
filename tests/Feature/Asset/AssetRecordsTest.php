@@ -3,11 +3,9 @@
 namespace Tests\Feature\Asset;
 
 use App\Enums\ApiCode;
-use App\Services\AuthTokenService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Http\Client\Request;
 use Illuminate\Support\Facades\Http;
-use Mockery\MockInterface;
 use Tests\TestCase;
 
 /**
@@ -31,7 +29,6 @@ class AssetRecordsTest extends TestCase
         Http::fake([
             self::UPSTREAM_URL => Http::response($this->successfulUpstreamResponse()),
         ]);
-        $this->mockAuthenticatedMember();
         $filters = [
             'fromDate' => '2026-10-01',
             'toDate' => '2026-10-27',
@@ -40,7 +37,7 @@ class AssetRecordsTest extends TestCase
             'assessmentPeriodType' => 'WEEK',
         ];
 
-        $response = $this->withToken('frontend-token')->postJson('/api/assets/records', $filters);
+        $response = $this->postJson('/api/assets/records', $filters);
 
         $response->assertStatus(200);
         $response->assertExactJson([
@@ -61,9 +58,7 @@ class AssetRecordsTest extends TestCase
     public function test_rejects_reversed_date_range(): void
     {
         Http::fake();
-        $this->mockAuthenticatedMember();
-
-        $response = $this->withToken('frontend-token')->postJson('/api/assets/records', [
+        $response = $this->postJson('/api/assets/records', [
             'fromDate' => '2026-10-27',
             'toDate' => '2026-10-01',
         ]);
@@ -84,9 +79,7 @@ class AssetRecordsTest extends TestCase
     public function test_rejects_invalid_filter_values(): void
     {
         Http::fake();
-        $this->mockAuthenticatedMember();
-
-        $response = $this->withToken('frontend-token')->postJson('/api/assets/records', [
+        $response = $this->postJson('/api/assets/records', [
             'fromDate' => '2026-10-01',
             'toDate' => '2026-10-27',
             'pageSize' => 101,
@@ -109,21 +102,28 @@ class AssetRecordsTest extends TestCase
      *
      * @return void
      */
-    public function test_rejects_request_without_token(): void
+    public function test_allows_request_without_token_during_third_party_integration(): void
     {
-        Http::fake();
+        config()->set('services.asset_records.url', self::UPSTREAM_URL);
+        Http::fake([
+            self::UPSTREAM_URL => Http::response($this->successfulUpstreamResponse()),
+        ]);
 
         $response = $this->postJson('/api/assets/records', [
             'fromDate' => '2026-10-01',
             'toDate' => '2026-10-27',
         ]);
 
-        $response->assertStatus(401);
-        $response->assertJson([
-            'code' => ApiCode::UNAUTHORIZED->value,
-            'message' => '未认证或令牌无效',
+        $response->assertStatus(200);
+        Http::assertSent(fn (Request $request): bool => $request->data() === [
+            'tenantId' => 'demo',
+            'mobile' => '13800000002',
+            'memberType' => 'NORMAL',
+            'fromDate' => '2026-10-01',
+            'toDate' => '2026-10-27',
+            'pageNo' => 1,
+            'pageSize' => 20,
         ]);
-        Http::assertNothingSent();
     }
 
     /**
@@ -141,9 +141,7 @@ class AssetRecordsTest extends TestCase
                 'data' => null,
             ]),
         ]);
-        $this->mockAuthenticatedMember();
-
-        $response = $this->withToken('frontend-token')->postJson('/api/assets/records', [
+        $response = $this->postJson('/api/assets/records', [
             'fromDate' => '2026-10-01',
             'toDate' => '2026-10-27',
         ]);
@@ -157,24 +155,6 @@ class AssetRecordsTest extends TestCase
     }
 
     /**
-     * 模拟 Token 对应的登录会员信息
-     *
-     * @return void
-     */
-    private function mockAuthenticatedMember(): void
-    {
-        $this->mock(AuthTokenService::class, function (MockInterface $mock): void {
-            $mock->shouldReceive('currentUser')
-                ->once()
-                ->andReturn([
-                    'tenantId' => 'demo',
-                    'mobile' => '13800000001',
-                    'member_type' => 'NORMAL',
-                ]);
-        });
-    }
-
-    /**
      * 返回预期发送给第三方的查询参数
      *
      * @param  array<string, mixed>  $filters  前端筛选参数
@@ -184,7 +164,7 @@ class AssetRecordsTest extends TestCase
     {
         return [
             'tenantId' => 'demo',
-            'mobile' => '13800000001',
+            'mobile' => '13800000002',
             'memberType' => 'NORMAL',
             'fromDate' => $filters['fromDate'],
             'toDate' => $filters['toDate'],
