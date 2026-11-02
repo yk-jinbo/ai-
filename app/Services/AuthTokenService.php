@@ -3,6 +3,7 @@
 namespace App\Services;
 
 use App\Caches\CacheManager;
+use App\Caches\CacheScope;
 use Illuminate\Auth\AuthenticationException;
 use JsonException;
 
@@ -14,6 +15,12 @@ use JsonException;
 class AuthTokenService
 {
     private const CACHE_SCOPE = 'auth-tokens';
+
+    private const LONG_TOKEN_CACHE_SCOPE = 'auth-token-digests';
+
+    private const MAX_TOKEN_IDENTIFIER_BYTES = 256;
+
+    private const TOKEN_HASH_ALGORITHM = 'sha256';
 
     public function __construct(private CacheManager $cacheManager) {}
 
@@ -39,8 +46,8 @@ class AuthTokenService
         }
 
         $ttl = max(1, $expiresIn ?? (int) config('services.member_auth.token_ttl_seconds', 172800));
-        $scope = $this->cacheManager->scope(self::CACHE_SCOPE);
-        $stored = $scope->connection()->setex($scope->key($token), $ttl, $payload);
+        $scope = $this->tokenScope($token);
+        $stored = $scope->connection()->setex($scope->key($this->tokenIdentifier($token)), $ttl, $payload);
 
         if ($stored === false) {
             throw new \RuntimeException('登录信息缓存失败');
@@ -61,8 +68,8 @@ class AuthTokenService
             throw new AuthenticationException('未认证或令牌无效');
         }
 
-        $scope = $this->cacheManager->scope(self::CACHE_SCOPE);
-        $raw = $scope->connection()->get($scope->key($token));
+        $scope = $this->tokenScope($token);
+        $raw = $scope->connection()->get($scope->key($this->tokenIdentifier($token)));
         if (! is_string($raw) || $raw === '') {
             throw new AuthenticationException('未认证或令牌无效');
         }
@@ -88,7 +95,27 @@ class AuthTokenService
             throw new AuthenticationException('未认证或令牌无效');
         }
 
-        $scope = $this->cacheManager->scope(self::CACHE_SCOPE);
-        $scope->connection()->del($scope->key($token));
+        $scope = $this->tokenScope($token);
+        $scope->connection()->del($scope->key($this->tokenIdentifier($token)));
+    }
+
+    private function tokenScope(string $token): CacheScope
+    {
+        // 隔离长令牌会话，避免提交摘要字符串的请求按短令牌路径命中同一 key。
+        if (strlen($token) > self::MAX_TOKEN_IDENTIFIER_BYTES) {
+            return $this->cacheManager->scope(self::LONG_TOKEN_CACHE_SCOPE);
+        }
+
+        return $this->cacheManager->scope(self::CACHE_SCOPE);
+    }
+
+    private function tokenIdentifier(string $token): string
+    {
+        if (strlen($token) <= self::MAX_TOKEN_IDENTIFIER_BYTES) {
+            return $token;
+        }
+
+        // JWT 可能超过缓存标识的 256 字节限制；只摘要长令牌，兼容已缓存短令牌的 key。
+        return self::TOKEN_HASH_ALGORITHM.':'.hash(self::TOKEN_HASH_ALGORITHM, $token);
     }
 }
