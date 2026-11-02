@@ -80,6 +80,14 @@ return [
             'replace_placeholders' => true,
         ],
 
+        'external_auth' => [
+            'driver' => 'daily',
+            'path' => storage_path('logs/external-auth.log'),
+            'level' => env('EXTERNAL_AUTH_LOG_LEVEL', 'warning'),
+            'days' => env('EXTERNAL_AUTH_LOG_DAYS', 30),
+            'replace_placeholders' => true,
+        ],
+
         'slack' => [
             'driver' => 'slack',
             'url' => env('LOG_SLACK_WEBHOOK_URL'),
