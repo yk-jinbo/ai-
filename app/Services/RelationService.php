@@ -29,7 +29,7 @@ class RelationService
      */
     public function getFansStatistics(): array
     {
-        $todayDay = date('Y-m-d');
+        $todayDay = date('Y-m-d', strtotime('-1 day'));
         $relations_response = $this->http->post(
             url: self::RELATION_RELATIONS_DETAILS,
             data: [
@@ -96,7 +96,7 @@ class RelationService
     public function getFansList(int $page, int $pagesize): array
     {
 
-        $todayDay = date('Y-m-d');
+        $todayDay = date('Y-m-d', strtotime('-1 day'));
         $response = $this->http->post(
             url: self::RELATION_RELATIONS_DETAILS,
             data: [
@@ -151,7 +151,7 @@ class RelationService
      */
     public function getTeamList(int $page, int $pagesize): array
     {
-        $todayDay = date('Y-m-d');
+        $todayDay = date('Y-m-d', strtotime('-1 day'));
         $response = $this->http->post(
             url: self::RELATION_RELATIONS_DETAILS,
             data: [
@@ -206,7 +206,7 @@ class RelationService
      */
     public function getTeamStatistics(): array
     {
-        $todayDay = date('Y-m-d');
+        $todayDay = date('Y-m-d', strtotime('-1 day'));
         $relations_response = $this->http->post(
             url: self::RELATION_RELATIONS_DETAILS,
             data: [
@@ -264,11 +264,31 @@ class RelationService
      */
     public function getExchangeStatistics(): array
     {
-        return [
-            'total_exchange_amount' => 13823500,
-            'today_exchange_amount' => 0,
-            'has_exchange_permission' => true,
-        ];
+//        $todayDay = date('Y-m-d');
+        $todayDay = date('Y-m-d', strtotime('-1 day'));
+
+        $response = $this->http->post(
+            url: '/api/v1/computing/query/relations/network/flows',
+            data: [
+                'tenantId' => 'demo',
+                'mobile' => '13800000002',
+                'memberType' => 'NORMAL',
+                'asOfDate' => $todayDay,
+                'fromDate' => '2026-10-26',
+                'toDate' => $todayDay,
+                'pageNo' => 1,
+                'pageSize' => 20,
+            ],
+            isSuccessful: static fn (Response $response): bool => $response->successful(),
+            service: 'relations_network_flows',
+        );
+
+        $data = $response->json('data');
+        if (! is_array($data)) {
+            throw new RuntimeException('关系流水接口未返回有效数据');
+        }
+
+        return $data;
     }
 
     /**
@@ -276,25 +296,51 @@ class RelationService
      *
      * @return array<string, mixed> 兑换额记录数据
      */
-    public function getExchangeStatisticsList(): array
+    public function getExchangeStatisticsList(string $startDate, string $endDate): array
     {
-        return [
-            'total_exchange_amount' => 3000,
-            'list' => [
-                [
-                    'date' => '2026-10-28',
-                    'exchange_amount' => 1000,
-                    'difference_from_previous_day' => 0,
-                    'difference_previous_day_type' => true,
-                ],
-                [
-                    'date' => '2026-10-29',
-                    'exchange_amount' => 2000,
-                    'difference_from_previous_day' => 1000,
-                    'difference_previous_day_type' => true,
-                ],
+        $todayDay = date('Y-m-d');
+
+        $response = $this->http->post(
+            url: '/api/v1/computing/query/relations/network/flows',
+            data: [
+                'tenantId' => 'demo',
+                'mobile' => '13800000002',
+                'memberType' => 'NORMAL',
+                'asOfDate' => $todayDay,
+                'fromDate' => $startDate,
+                'toDate' => $endDate,
+                'pageNo' => 1,
+                'pageSize' => 20,
             ],
-        ];
+            isSuccessful: static fn (Response $response): bool => $response->successful(),
+            service: 'relations_network_flows',
+        );
+
+        $data = $response->json('data');
+        if (! is_array($data)) {
+            throw new RuntimeException('关系流水接口未返回有效数据');
+        }
+
+        $items = [];
+        foreach ($data['items'] ?? [] as $item) {
+            $items[] = [
+                'date' => $item['bizDate'] ?? '',
+                'exchange_amount' => $item['exchangeAmount'] ?? '0.00',
+            ];
+        }
+
+        usort($items, static fn (array $left, array $right): int => strcmp($left['date'], $right['date']));
+
+        $previousAmount = null;
+        foreach ($items as $index => $item) {
+            $exchangeAmount = (float) $item['exchange_amount'];
+            $difference = $previousAmount === null ? 0 : abs($exchangeAmount - $previousAmount);
+            $items[$index]['difference_from_previous_day'] = number_format($difference, 2, '.', '');
+            $items[$index]['difference_previous_day_type'] = $previousAmount === null || $exchangeAmount >= $previousAmount;
+            $previousAmount = $exchangeAmount;
+        }
+
+        return $items;
     }
 
     /**
