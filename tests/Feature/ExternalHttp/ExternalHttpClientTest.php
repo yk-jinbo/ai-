@@ -121,6 +121,24 @@ class ExternalHttpClientTest extends TestCase
         });
     }
 
+    /** 验证粉丝列表从 fan_name 生成 fan_name_abbr，避免读取错误字段导致接口异常。 */
+    public function test_relation_fans_list_adds_abbreviation_from_fan_name(): void
+    {
+        config()->set('services.external_http.gateways.default', 'http://192.168.11.202:8082');
+        Http::fake(['*' => Http::response(['code' => 'OK', 'data' => [
+            'items' => [[
+                'member' => ['mobile' => '13800000001', 'memberName' => '张三', 'memberLevel' => 'VIP'],
+                'userDailyExchangeAmount' => '20.00',
+                'directMemberCount' => 3,
+            ]],
+        ]])]);
+
+        $result = $this->app->make(RelationService::class)->getFansList(1, 10);
+
+        $this->assertSame('张三', $result['data'][0]['fan_name']);
+        $this->assertSame('张', $result['data'][0]['fan_name_abbr']);
+    }
+
     /** 验证 HTTP 错误只记录一次，保留上游状态、业务码和追踪标识。 */
     public function test_http_error_is_logged_once_with_diagnostic_context(): void
     {
