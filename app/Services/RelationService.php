@@ -31,6 +31,8 @@ class RelationService
     /**
      * 获取粉丝团列表示例数据。
      *
+     * 业务逻辑：为每位粉丝补充名称首字，再组装分页结果。
+     *
      * @param  int  $page  当前页码
      * @param  int  $pagesize  每页数量
      * @return array<string, mixed> 粉丝团分页数据
@@ -59,6 +61,11 @@ class RelationService
                 'active_count' => 0,
             ],
         ];
+
+        foreach ($items as $index => $fan) {
+            // 按 UTF-8 字符截取，避免中文名称的首字被拆成无效字节。
+            $items[$index]['fan_name_abbr'] = mb_substr($fan['fan_name'], 0, 1, 'UTF-8');
+        }
 
         return $this->paginate($items, 11, $page, $pagesize);
     }
@@ -92,6 +99,11 @@ class RelationService
                 'total_exchange_amount' => 0,
             ],
         ];
+
+        foreach ($items as $index => $fan) {
+            // 按 UTF-8 字符截取，避免中文名称的首字被拆成无效字节。
+            $items[$index]['member_name_abbr'] = mb_substr($fan['member_name'], 0, 1, 'UTF-8');
+        }
 
         return $this->paginate($items, 22, $page, $pagesize);
     }
