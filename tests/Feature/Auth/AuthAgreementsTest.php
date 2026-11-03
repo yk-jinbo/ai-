@@ -2,11 +2,14 @@
 
 namespace Tests\Feature\Auth;
 
+use Illuminate\Contracts\Redis\Factory;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Http\Client\ConnectionException;
 use Illuminate\Http\Client\Request as ClientRequest;
+use Illuminate\Redis\Connections\Connection;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
+use Mockery;
 use Monolog\Handler\TestHandler;
 use PHPUnit\Framework\Attributes\DataProvider;
 use Tests\TestCase;
@@ -29,6 +32,13 @@ class AuthAgreementsTest extends TestCase
         parent::setUp();
         config()->set('cache.hash_key', 'agreement-tests-only-cache-key');
         config()->set('services.member_auth.base_url', 'https://identity.example.test');
+        $redis = Mockery::mock(Connection::class);
+        $redis->shouldReceive('setex')->andReturn(true);
+        $redis->shouldReceive('get')->andReturn(null);
+        $redis->shouldReceive('del')->andReturn(0);
+        $factory = Mockery::mock(Factory::class);
+        $factory->shouldReceive('connection')->with('cache')->andReturn($redis);
+        $this->app->instance(Factory::class, $factory);
         config()->set('logging.channels.external_http', ['driver' => 'monolog', 'handler' => TestHandler::class]);
         Log::forgetChannel('external_http');
         $this->handler = Log::channel('external_http')->getLogger()->getHandlers()[0];

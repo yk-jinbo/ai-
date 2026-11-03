@@ -2,6 +2,8 @@
 
 namespace App\Services;
 
+use App\Caches\CacheManager;
+use App\Caches\CacheScope;
 use App\Enums\ApiCode;
 use App\Helpers\ResponseHelper;
 use Illuminate\Support\Arr;
@@ -16,18 +18,24 @@ class AuthService
 {
     private const DEFAULT_TICKET_TTL_SECONDS = 300;
 
+    private const LOGIN_MOBILE_CACHE_SCOPE = 'auth-login-mobiles';
+
+    private const TICKET_HASH_ALGORITHM = 'sha256';
+
     /**
      * 注入上游认证客户端、本地令牌服务和滑块验证码服务。
      *
      * @param  ExternalAuthClient  $externalAuthClient  上游会员认证客户端
      * @param  AuthTokenService  $authTokenService  本地 Redis 令牌服务
      * @param  LoginCaptchaService  $loginCaptchaService  本地滑块验证码服务
+     * @param  CacheManager  $cacheManager  登录票据临时信息缓存适配器
      * @return void
      */
     public function __construct(
         private ExternalAuthClient $externalAuthClient,
         private AuthTokenService $authTokenService,
         private LoginCaptchaService $loginCaptchaService,
+        private CacheManager $cacheManager,
     ) {}
 
     /** 发送短信前消费本地滑块验证码，再转发登录短信请求。 */
@@ -53,6 +61,10 @@ class AuthService
         $result = $this->externalAuthClient->preparePasswordLogin($username, $password);
         $this->ensureSuccess($result, '账号或密码错误');
         $data = $this->normalizePrepareData($result->data);
+        $mobile = $this->normalizeLoginMobile($username);
+        if ($mobile !== null) {
+            $this->rememberLoginMobile($data['ticket'], $mobile, $data['expires_in']);
+        }
 
         return new AuthLoginResult(
             $data,
@@ -66,6 +78,7 @@ class AuthService
         $result = $this->externalAuthClient->prepareSmsLogin($mobile, $code);
         $this->ensureSuccess($result, '验证码错误或已过期');
         $data = $this->normalizePrepareData($result->data);
+        $this->rememberLoginMobile($data['ticket'], $mobile, $data['expires_in']);
 
         return new AuthLoginResult(
             $data,
@@ -118,13 +131,14 @@ class AuthService
      */
     public function confirmLogin(string $ticket, string $memberType, ?array $agreementConsent = null): AuthLoginResult
     {
+        $loginMobile = $this->loginMobileForTicket($ticket);
         $result = $this->externalAuthClient->confirmLogin($ticket, $memberType, $agreementConsent);
         $this->ensureSuccess($result, '登录确认失败');
 
         $data = $this->normalizeTokenData($result->data, $memberType);
         $token = (string) ($data['token'] ?? '');
         ResponseHelper::errorIf($token === '', '登录响应缺少访问令牌', ApiCode::ERROR);
-        $user = $this->storedUser($result->data, $data, $memberType);
+        $user = $this->storedUser($result->data, $data, $memberType, $loginMobile);
         $data['user'] = $user;
 
         $this->authTokenService->store(
@@ -132,6 +146,9 @@ class AuthService
             $user,
             $data['expires_in'],
         );
+        if ($loginMobile !== null) {
+            $this->forgetLoginMobile($ticket);
+        }
 
         return new AuthLoginResult(
             $data,
@@ -180,6 +197,44 @@ class AuthService
             ),
             'member_types' => $memberTypes,
         ];
+    }
+
+    private function normalizeLoginMobile(string $mobile): ?string
+    {
+        $mobile = trim($mobile);
+
+        return preg_match('/^1[3-9]\\d{9}$/', $mobile) === 1 ? $mobile : null;
+    }
+
+    private function rememberLoginMobile(string $ticket, string $mobile, int $expiresIn): void
+    {
+        $scope = $this->loginMobileScope();
+        $stored = $scope->connection()->setex($this->loginMobileCacheKey($ticket), max(1, $expiresIn), $mobile);
+        ResponseHelper::errorIf($stored === false, '登录信息暂时无法保存，请重试', ApiCode::ERROR);
+    }
+
+    private function loginMobileForTicket(string $ticket): ?string
+    {
+        $scope = $this->loginMobileScope();
+        $mobile = $scope->connection()->get($this->loginMobileCacheKey($ticket));
+
+        return is_string($mobile) && $mobile !== '' ? $mobile : null;
+    }
+
+    private function forgetLoginMobile(string $ticket): void
+    {
+        $scope = $this->loginMobileScope();
+        $scope->connection()->del($this->loginMobileCacheKey($ticket));
+    }
+
+    private function loginMobileCacheKey(string $ticket): string
+    {
+        return $this->loginMobileScope()->key(hash(self::TICKET_HASH_ALGORITHM, $ticket));
+    }
+
+    private function loginMobileScope(): CacheScope
+    {
+        return $this->cacheManager->scope(self::LOGIN_MOBILE_CACHE_SCOPE);
     }
 
     /** @param array<string, mixed> $data @return array<string, mixed> */
@@ -243,16 +298,20 @@ class AuthService
      * @param  array<string, mixed>  $normalizedData
      * @return array<string, mixed>
      */
-    private function storedUser(array $externalData, array $normalizedData, string $memberType): array
-    {
+    private function storedUser(
+        array $externalData,
+        array $normalizedData,
+        string $memberType,
+        ?string $loginMobile,
+    ): array {
         $user = $externalData['user']
             ?? $externalData['member']
             ?? $externalData['memberInfo']
             ?? $externalData['userInfo']
             ?? null;
-        $mobile = is_array($user)
+        $mobile = $loginMobile ?? (is_array($user)
             ? $this->extractMobile($user) ?? $this->extractMobile($externalData)
-            : $this->extractMobile($externalData);
+            : $this->extractMobile($externalData));
         if (is_array($user)) {
             if ($mobile !== null) {
                 $user['mobile'] = $mobile;
