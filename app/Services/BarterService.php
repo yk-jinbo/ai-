@@ -28,6 +28,10 @@ class BarterService
     {
         $mobile = trim((string) ($user['mobile'] ?? ''));
         $memberType = trim((string) ($user['memberType'] ?? $user['member_type'] ?? ''));
+        return  [
+            'mobile' => $mobile,
+            'memberType' => $memberType,
+        ];
 
 //        ResponseHelper::errorIf($mobile === '' || $memberType === '', '登录用户信息不完整');
         if (empty($mobile) || empty($memberType)) {
