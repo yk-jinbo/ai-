@@ -264,8 +264,8 @@ class RelationService
      */
     public function getExchangeStatistics(): array
     {
-//        $todayDay = date('Y-m-d');
-        $todayDay = date('Y-m-d', strtotime('-1 day'));
+        $todayDay = date('Y-m-d');
+//        $todayDay = '2026-10-27';
 
         $response = $this->http->post(
             url: '/api/v1/computing/query/relations/network/flows',
@@ -274,10 +274,10 @@ class RelationService
                 'mobile' => '13800000002',
                 'memberType' => 'NORMAL',
                 'asOfDate' => $todayDay,
-                'fromDate' => '2026-10-26',
+                'fromDate' => '2026-10-01',
                 'toDate' => $todayDay,
                 'pageNo' => 1,
-                'pageSize' => 20,
+                'pageSize' => 1,
             ],
             isSuccessful: static fn (Response $response): bool => $response->successful(),
             service: 'relations_network_flows',
@@ -288,7 +288,12 @@ class RelationService
             throw new RuntimeException('关系流水接口未返回有效数据');
         }
 
-        return $data;
+//        return $data;
+        return [
+            'total_exchange_amount' => $data['accumulatedExchangeAmount'] ?? '0.00',
+            'today_exchange_amount' => $data['dailyExchangeAmount'] ?? '0.00',
+            'has_exchange_permission' => true,
+        ];
     }
 
     /**
@@ -299,6 +304,7 @@ class RelationService
     public function getExchangeStatisticsList(string $startDate, string $endDate): array
     {
         $todayDay = date('Y-m-d');
+//        $todayDay = $endDate = '2026-10-27';
 
         $response = $this->http->post(
             url: '/api/v1/computing/query/relations/network/flows',
