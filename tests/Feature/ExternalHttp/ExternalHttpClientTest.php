@@ -5,6 +5,7 @@ namespace Tests\Feature\ExternalHttp;
 use App\Enums\ExternalGateway;
 use App\Services\ExternalAuthClient;
 use App\Services\ExternalHttpClient;
+use App\Services\BarterService;
 use App\Services\RelationService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Http\Client\ConnectionException;
@@ -98,6 +99,25 @@ class ExternalHttpClientTest extends TestCase
         });
     }
 
+    /** 验证 barter 统计使用首页指标接口的 JSON 契约并返回上游 data。 */
+    public function test_barter_statistics_uses_home_indicators(): void
+    {
+        config()->set('services.external_http.gateways.default', 'http://192.168.11.202:8082');
+        $upstreamData = ['todayGeneralCoupon' => '121.11', 'yesterdayBarterAmount' => '999999.999'];
+        Http::fake(['*' => Http::response(['code' => 'OK', 'data' => $upstreamData])]);
+
+        $result = $this->app->make(BarterService::class)->getBarterStatistics();
+
+        $this->assertSame($upstreamData, $result);
+        Http::assertSent(function (ClientRequest $request): bool {
+            return $request->method() === 'POST'
+                && $request->url() === 'http://192.168.11.202:8082/api/v1/computing/query/home/indicators'
+                && $request['tenantId'] === 'demo'
+                && $request['mobile'] === '13800000002'
+                && $request['memberType'] === 'NORMAL';
+        });
+    }
+
     /** 验证团队列表将本地分页参数传给关系详情接口并返回上游 data。 */
     public function test_relation_team_list_uses_upstream_details(): void
     {
@@ -118,6 +138,53 @@ class ExternalHttpClientTest extends TestCase
                 && $request['relationType'] === 'NETWORK'
                 && $request['pageNo'] === 1
                 && $request['pageSize'] === 10;
+        });
+    }
+
+    /** 验证兑换流水列表将日期映射到关系网络流水接口。 */
+    public function test_relation_exchange_statistics_list_uses_network_flows(): void
+    {
+        config()->set('services.external_http.gateways.default', 'http://192.168.11.202:8082');
+        $upstreamData = ['items' => [
+            ['bizDate' => '2026-08-03', 'exchangeAmount' => '120.00', 'changeFromPreviousDay' => '999.00'],
+            ['bizDate' => '2026-08-01', 'exchangeAmount' => '100.00'],
+            ['bizDate' => '2026-08-02', 'exchangeAmount' => '80.00'],
+        ]];
+        Http::fake(['*' => Http::response(['code' => 'OK', 'data' => $upstreamData])]);
+
+        $result = $this->app->make(RelationService::class)->getExchangeStatisticsList('2026-08-01', '2026-08-03');
+
+        $this->assertSame([
+            [
+                'date' => '2026-08-01',
+                'exchange_amount' => '100.00',
+                'difference_from_previous_day' => '0.00',
+                'difference_previous_day_type' => true,
+            ],
+            [
+                'date' => '2026-08-02',
+                'exchange_amount' => '80.00',
+                'difference_from_previous_day' => '20.00',
+                'difference_previous_day_type' => false,
+            ],
+            [
+                'date' => '2026-08-03',
+                'exchange_amount' => '120.00',
+                'difference_from_previous_day' => '40.00',
+                'difference_previous_day_type' => true,
+            ],
+        ], $result);
+        Http::assertSent(function (ClientRequest $request): bool {
+            return $request->method() === 'POST'
+                && $request->url() === 'http://192.168.11.202:8082/api/v1/computing/query/relations/network/flows'
+                && $request['tenantId'] === 'demo'
+                && $request['mobile'] === '13800000002'
+                && $request['memberType'] === 'NORMAL'
+                && $request['asOfDate'] === date('Y-m-d')
+                && $request['fromDate'] === '2026-08-01'
+                && $request['toDate'] === '2026-08-03'
+                && $request['pageNo'] === 1
+                && $request['pageSize'] === 20;
         });
     }
 

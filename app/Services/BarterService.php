@@ -2,12 +2,21 @@
 
 namespace App\Services;
 
+use Illuminate\Http\Client\Response;
+use RuntimeException;
+
 /**
  * 兑换统计 Demo 服务。
  * 负责提供 barter 统计接口固定示例数据，后续可替换为正式业务查询。
  */
 class BarterService
 {
+    private const HOME_INDICATORS_ENDPOINT = '/api/v1/computing/query/home/indicators';
+
+    public function __construct(
+        private ExternalHttpClient $http,
+    ) {}
+
     /**
      * 获取 barter 统计示例数据。
      *
@@ -15,9 +24,26 @@ class BarterService
      */
     public function getBarterStatistics(): array
     {
+        $response = $this->http->post(
+            url: self::HOME_INDICATORS_ENDPOINT,
+            data: [
+                'tenantId' => 'demo',
+                'mobile' => '13800000002',
+                'memberType' => 'NORMAL',
+            ],
+            isSuccessful: static fn (Response $response): bool => $response->successful(),
+            service: 'home_indicators',
+        );
+
+        $data = $response->json('data');
+        if (! is_array($data)) {
+            throw new RuntimeException('首页指标接口未返回有效数据');
+        }
+
+//        return $data;
         return [
-            'today_general_coupon' => '121.11',
-            'yesterday_barter_amount' => '999999.999',
+            'today_general_coupon' => $data['tongbaoPrice'] ?? '0.00',
+            'yesterday_barter_amount' => $data['yesterdayTradeAmount'] ?? '0.00',
         ];
     }
 }
