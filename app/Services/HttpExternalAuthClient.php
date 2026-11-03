@@ -20,6 +20,10 @@ class HttpExternalAuthClient implements ExternalAuthClient
 
     private const CONFIRM_ENDPOINT = 'member/login/confirm';
 
+    private const AGREEMENT_POLICY_ENDPOINT = 'member/agreements/policy';
+
+    private const AGREEMENT_VERSION_ENDPOINT = 'member/agreements/versions/';
+
     /**
      * 注入通用外部请求客户端，认证接口共用超时、请求标识和异常日志。
      *
@@ -75,28 +79,60 @@ class HttpExternalAuthClient implements ExternalAuthClient
     }
 
     /**
-     * 转发身份选择和协议确认。
+     * 匿名查询所选身份的协议清单，使用认证网关和通用失败日志。
+     *
+     * @param  string  $memberType  用户选择的身份
+     * @param  string  $scene  LOGIN 或 REGISTER 协议场景
+     * @return ExternalAuthResult 上游协议版本清单
+     */
+    public function agreementPolicy(string $memberType, string $scene): ExternalAuthResult
+    {
+        return $this->request(self::AGREEMENT_POLICY_ENDPOINT, [
+            'scene' => $scene,
+            'memberType' => $memberType,
+        ], 'GET');
+    }
+
+    /**
+     * 匿名读取清单指定的已发布协议版本，保持版本 ID 的字符串精度。
+     *
+     * @param  string  $versionId  上游协议版本 ID
+     * @return ExternalAuthResult 协议正文及版本信息
+     */
+    public function agreementVersion(string $versionId): ExternalAuthResult
+    {
+        return $this->request(self::AGREEMENT_VERSION_ENDPOINT.rawurlencode($versionId), [], 'GET');
+    }
+
+    /**
+     * 转发身份选择，将本项目协议字段转换为上游 agreementConsent 对象。
      *
      * @param  string  $ticket  登录校验票据
      * @param  string  $memberType  选中的会员身份
-     * @param  bool  $agreementAccepted  是否接受协议
+     * @param  array{accepted: bool, policy_hash?: string, documents?: list<array{document_code: string, version_id: string}>}|null  $agreementConsent  客户端提交的完整协议同意信息
      * @return ExternalAuthResult 上游标准化响应
      */
-    public function confirmLogin(string $ticket, string $memberType, bool $agreementAccepted): ExternalAuthResult
+    public function confirmLogin(string $ticket, string $memberType, ?array $agreementConsent = null): ExternalAuthResult
     {
-        return $this->request(self::CONFIRM_ENDPOINT, [
+        $payload = [
             'ticket' => $ticket,
             'memberType' => $memberType,
-            'agreementAccepted' => $agreementAccepted,
-        ]);
+        ];
+        // 同意状态和版本必须来自客户端；不自动获取新版本替换用户已阅读的版本。
+        if ($agreementConsent !== null) {
+            $payload['agreementConsent'] = $this->consentPayload($agreementConsent);
+        }
+
+        return $this->request(self::CONFIRM_ENDPOINT, $payload);
     }
 
     /** @param array<string, mixed> $payload */
-    private function request(string $endpoint, array $payload): ExternalAuthResult
+    private function request(string $endpoint, array $payload, string $method = 'POST'): ExternalAuthResult
     {
         $url = $this->url($endpoint);
         try {
-            $response = $this->http->post(
+            $response = $this->http->request(
+                method: $method,
                 url: $url ?? '',
                 data: $payload,
                 isSuccessful: static function (Response $response): bool {
@@ -117,6 +153,26 @@ class HttpExternalAuthClient implements ExternalAuthClient
         }
 
         return $this->parseResponse($response);
+    }
+
+    /** @param array<string, mixed> $consent @return array<string, mixed> */
+    private function consentPayload(array $consent): array
+    {
+        $payload = ['accepted' => (bool) $consent['accepted']];
+        if (isset($consent['policy_hash'])) {
+            $payload['policyHash'] = $consent['policy_hash'];
+        }
+        if (isset($consent['documents'])) {
+            $payload['documents'] = [];
+            foreach ($consent['documents'] as $document) {
+                $payload['documents'][] = [
+                    'documentCode' => $document['document_code'],
+                    'versionId' => $document['version_id'],
+                ];
+            }
+        }
+
+        return $payload;
     }
 
     private function parseResponse(Response $response): ExternalAuthResult

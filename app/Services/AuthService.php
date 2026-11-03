@@ -5,6 +5,7 @@ namespace App\Services;
 use App\Enums\ApiCode;
 use App\Helpers\ResponseHelper;
 use Illuminate\Support\Arr;
+use Illuminate\Support\Str;
 
 /**
  * 会员认证业务服务。
@@ -72,10 +73,52 @@ class AuthService
         );
     }
 
-    /** 选择身份并确认协议，保存上游令牌后返回旧项目登录字段。 */
-    public function confirmLogin(string $ticket, string $memberType, bool $agreementAccepted): AuthLoginResult
+    /**
+     * 查询协议清单并转换为本项目字段，协议版本和摘要保持上游原值。
+     *
+     * @param  string  $memberType  用户选择的身份
+     * @param  string  $scene  协议场景，登录使用 LOGIN
+     * @return AuthLoginResult 本项目格式的协议清单及提示
+     *
+     * @throws \Exception 上游协议清单查询失败时抛出
+     */
+    public function agreementPolicy(string $memberType, string $scene): AuthLoginResult
     {
-        $result = $this->externalAuthClient->confirmLogin($ticket, $memberType, $agreementAccepted);
+        $result = $this->externalAuthClient->agreementPolicy($memberType, $scene);
+        $this->ensureSuccess($result, '协议清单获取失败');
+
+        return new AuthLoginResult($this->normalizeAgreementData($result->data), $result->message ?: '协议清单获取成功');
+    }
+
+    /**
+     * 读取协议正文，转换元数据字段名并保留正文的块、片段和样式。
+     *
+     * @param  string  $versionId  清单中的协议版本 ID
+     * @return AuthLoginResult 本项目格式的协议正文及提示
+     *
+     * @throws \Exception 上游协议正文查询失败时抛出
+     */
+    public function agreementVersion(string $versionId): AuthLoginResult
+    {
+        $result = $this->externalAuthClient->agreementVersion($versionId);
+        $this->ensureSuccess($result, '协议正文获取失败');
+
+        return new AuthLoginResult($this->normalizeAgreementData($result->data), $result->message ?: '协议正文获取成功');
+    }
+
+    /**
+     * 提交所选身份及客户端确认的协议版本，成功后保存用户信息和上游令牌。
+     *
+     * @param  string  $ticket  登录校验票据
+     * @param  string  $memberType  所选身份
+     * @param  array<string, mixed>|null  $agreementConsent  同意状态、协议摘要和完整版本集合
+     * @return AuthLoginResult 旧项目格式的登录结果
+     *
+     * @throws \Exception 上游确认失败或未返回访问令牌时抛出
+     */
+    public function confirmLogin(string $ticket, string $memberType, ?array $agreementConsent = null): AuthLoginResult
+    {
+        $result = $this->externalAuthClient->confirmLogin($ticket, $memberType, $agreementConsent);
         $this->ensureSuccess($result, '登录确认失败');
 
         $data = $this->normalizeTokenData($result->data, $memberType);
@@ -99,8 +142,7 @@ class AuthService
     /**
      * 清除本地 Redis 中保存的登录令牌。
      *
-     * @param  string  $token  上游访问令牌
-     * @return void
+     * @return void 从当前请求读取令牌并清除对应用户缓存
      */
     public function logout(): void
     {
@@ -138,6 +180,27 @@ class AuthService
             ),
             'member_types' => $memberTypes,
         ];
+    }
+
+    /** @param array<string, mixed> $data @return array<string, mixed> */
+    private function normalizeAgreementData(array $data): array
+    {
+        $normalized = [];
+        foreach ($data as $key => $value) {
+            $normalized[Str::snake($key)] = $value;
+        }
+        // 版本 ID 可能超出 JavaScript 安全整数范围，整个中转流程按字符串传递。
+        if (isset($normalized['version_id'])) {
+            $normalized['version_id'] = (string) $normalized['version_id'];
+        }
+        if (isset($normalized['documents']) && is_array($normalized['documents'])) {
+            $normalized['documents'] = [];
+            foreach ($data['documents'] as $document) {
+                $normalized['documents'][] = $this->normalizeAgreementData($document);
+            }
+        }
+
+        return $normalized;
     }
 
     /**
@@ -246,7 +309,8 @@ class AuthService
             'SMS_VERIFY_LOCKED',
             'SMS_IP_LOCKED' => ApiCode::UNAUTHORIZED,
             'NOT_FOUND' => ApiCode::NOT_FOUND,
-            'BIZ_CONFLICT', 'SMS_TOO_FREQUENT', 'SMS_DAILY_LIMIT', 'TENANT_UNASSIGNED' => ApiCode::CONFLICT,
+            'BIZ_CONFLICT', 'SMS_TOO_FREQUENT', 'SMS_DAILY_LIMIT', 'TENANT_UNASSIGNED',
+            'AGREEMENT_NOT_ACCEPTED', 'AGREEMENT_VERSION_CHANGED', 'AGREEMENT_SET_MISMATCH' => ApiCode::CONFLICT,
             default => ApiCode::ERROR,
         };
     }

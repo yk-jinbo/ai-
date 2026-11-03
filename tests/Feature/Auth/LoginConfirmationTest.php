@@ -6,6 +6,7 @@ use App\Caches\CacheManager;
 use App\Helpers\ResponseHelper;
 use Illuminate\Contracts\Redis\Factory;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Http\Client\Request as ClientRequest;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Redis\Connections\Connection;
@@ -89,7 +90,7 @@ class LoginConfirmationTest extends TestCase
         $response = $this->postJson('/api/auth/login/confirm', [
             'ticket' => 'test-login-ticket',
             'member_type' => 'NORMAL',
-            'agreement_accepted' => true,
+            'agreement_consent' => $this->agreementConsent(),
         ]);
         $response->assertStatus(200);
         $response->assertJsonStructure(['code', 'message', 'data' => ['token', 'token_type', 'expires_in', 'member_type', 'user']]);
@@ -153,7 +154,7 @@ class LoginConfirmationTest extends TestCase
         $this->postJson('/api/auth/login/confirm', [
             'ticket' => 'sms-login-ticket',
             'member_type' => 'NORMAL',
-            'agreement_accepted' => true,
+            'agreement_consent' => $this->agreementConsent(),
         ])->assertStatus(200)->assertJson([
             'code' => 0,
             'data' => ['user' => ['id' => 8, 'mobile' => '13900001111']],
@@ -181,12 +182,71 @@ class LoginConfirmationTest extends TestCase
         $this->postJson('/api/auth/login/confirm', [
             'ticket' => 'test-login-ticket',
             'member_type' => 'NORMAL',
-            'agreement_accepted' => false,
+            'agreement_consent' => ['accepted' => false],
         ])->assertStatus(200)->assertJson(['code' => 0]);
 
-        Http::assertSent(fn ($request): bool =>
-            str_ends_with($request->url(), 'member/login/confirm')
-            && $request['agreementAccepted'] === false
+        Http::assertSent(fn (ClientRequest $request): bool => str_ends_with($request->url(), 'member/login/confirm')
+            && $request['agreementConsent'] === ['accepted' => false]
+            && ! isset($request['agreementAccepted'])
         );
+    }
+
+    /**
+     * 用户已确认的摘要和全部版本直接转发，版本 ID 保持字符串且不额外重新查询协议。
+     */
+    public function test_confirm_login_forwards_complete_consent_and_preserves_version_ids(): void
+    {
+        Http::fake(['*' => Http::response([
+            'code' => 'OK',
+            'data' => ['accessToken' => 'complete-consent-token', 'user' => ['mobile' => '13900001111']],
+        ])]);
+
+        $this->postJson('/api/auth/login/confirm', [
+            'ticket' => 'confirmed-policy-ticket',
+            'member_type' => 'NORMAL',
+            'agreement_consent' => $this->agreementConsent(),
+        ])->assertStatus(200)->assertJson(['code' => 0]);
+
+        Http::assertSent(fn (ClientRequest $request): bool => $request->data() === [
+            'ticket' => 'confirmed-policy-ticket',
+            'memberType' => 'NORMAL',
+            'agreementConsent' => [
+                'accepted' => true,
+                'policyHash' => 'policy-reviewed-by-user',
+                'documents' => [
+                    ['documentCode' => 'NORMAL_USER_AGREEMENT', 'versionId' => '9007199254740993'],
+                    ['documentCode' => 'NORMAL_PRIVACY_POLICY', 'versionId' => '102'],
+                ],
+            ],
+        ]);
+        Http::assertSentCount(1);
+    }
+
+    /**
+     * 协议校验关闭的上游可接收未提供同意对象的请求，本项目不补造用户同意。
+     */
+    public function test_confirm_login_without_consent_does_not_add_acceptance(): void
+    {
+        Http::fake(['*' => Http::response(['code' => 'OK', 'data' => ['accessToken' => 'no-consent-token']])]);
+
+        $this->postJson('/api/auth/login/confirm', [
+            'ticket' => 'no-consent-ticket',
+            'member_type' => 'NORMAL',
+        ])->assertStatus(200)->assertJson(['code' => 0]);
+
+        Http::assertSent(fn (ClientRequest $request): bool => ! isset($request['agreementConsent']) && ! isset($request['agreementAccepted']));
+    }
+
+    /** @return array<string, mixed> 用户阅读确认的协议摘要与完整版本集合 */
+    private function agreementConsent(): array
+    {
+        return [
+            'accepted' => true,
+            'policy_hash' => 'policy-reviewed-by-user',
+            'documents' => [
+                ['document_code' => 'NORMAL_USER_AGREEMENT', 'version_id' => '9007199254740993'],
+                ['document_code' => 'NORMAL_PRIVACY_POLICY', 'version_id' => '102'],
+            ],
+        ];
     }
 }
