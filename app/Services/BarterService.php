@@ -24,24 +24,18 @@ class BarterService
      * @param  array<string, mixed>  $user  当前登录用户信息
      * @return array<string, string> 包含今日通用券和昨日兑换金额
      */
-    public function getBarterStatistics(array $user): array
+    public function getBarterStatistics(array $user, string $token): array
     {
         $mobile = trim((string) ($user['mobile'] ?? ''));
         $memberType = trim((string) ($user['memberType'] ?? $user['member_type'] ?? ''));
-        return  [
-            'mobile' => $mobile,
-            'memberType' => $memberType,
-        ];
 
-//        ResponseHelper::errorIf($mobile === '' || $memberType === '', '登录用户信息不完整');
-        if (empty($mobile) || empty($memberType)) {
-            throw new RuntimeException('登录用户信息不完整');
-        }
+        ResponseHelper::errorIf($mobile === '' || $memberType === '' || trim($token) === '', '登录用户信息不完整');
 
         $response = $this->http->post(
             url: self::HOME_INDICATORS_ENDPOINT,
             data: [
-                'tenantId' => 'demo',
+//                'tenantId' => 'demo',
+                'token' => trim($token),
                 'mobile' => $mobile,
                 'memberType' => $memberType,
             ],
@@ -49,12 +43,18 @@ class BarterService
             service: 'home_indicators',
         );
 
-        $data = $response->json('data');
-        if (! is_array($data)) {
-            throw new RuntimeException('首页指标接口未返回有效数据');
+        $body = $response->json();
+        $data = is_array($body) ? ($body['data'] ?? $body['result'] ?? null) : null;
+        if (! is_array($data) && is_array($body)
+            && (array_key_exists('tongbaoPrice', $body) || array_key_exists('yesterdayTradeAmount', $body))) {
+            $data = $body;
         }
 
-//        return $data;
+        if (! is_array($data)) {
+            $keys = is_array($body) ? implode(',', array_keys($body)) : get_debug_type($body);
+            throw new RuntimeException('首页指标接口响应结构无法识别，响应字段：'.$keys);
+        }
+
         return [
             'today_general_coupon' => $data['tongbaoPrice'] ?? '0.00',
             'yesterday_barter_amount' => $data['yesterdayTradeAmount'] ?? '0.00',

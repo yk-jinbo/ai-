@@ -7,6 +7,7 @@ use App\Http\Controllers\Controller;
 use App\Services\AuthTokenService;
 use App\Services\BarterService;
 use Illuminate\Http\JsonResponse;
+use Illuminate\Http\Request;
 use Spatie\RouteAttributes\Attributes\Get;
 use Spatie\RouteAttributes\Attributes\Prefix;
 
@@ -32,12 +33,13 @@ class BarterController extends Controller
      * @return JsonResponse 统一结构的 barter 统计响应
      */
     #[Get('barter-statistics', name: 'api.barter.barter-statistics')]
-    public function barterStatistics(AuthTokenService $authTokenService): JsonResponse
+    public function barterStatistics(Request $request, AuthTokenService $authTokenService): JsonResponse
     {
         $user = $authTokenService->currentUser();
+        $token = (string) $request->bearerToken();
 
         return ResponseHelper::success(
-            $this->barterService->getBarterStatistics($user),
+            $this->barterService->getBarterStatistics($user, $token),
             '获取成功',
         );
     }

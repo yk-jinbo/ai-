@@ -27,20 +27,18 @@ class RelationService
      *
      * @return array<string, int|string> 粉丝统计数据
      */
-    public function getFansStatistics(): array
+    public function getFansStatistics(array $user, string $token): array
     {
         $todayDay = date('Y-m-d', strtotime('-1 day'));
+        $identity = $this->identityParameters($user, $token);
         $relations_response = $this->http->post(
             url: self::RELATION_RELATIONS_DETAILS,
-            data: [
-                "tenantId" => "demo",
-                "mobile" => "13800000002",
-                "memberType" => "NORMAL",
+            data: array_merge($identity, [
                 "asOfDate" => $todayDay,
                 "relationType" => "DIRECT",
                 "pageNo" => 1,
                 "pageSize" => 1
-            ],
+            ]),
             isSuccessful: static fn (Response $relations_response): bool => $relations_response->successful(),
             service: 'relations_details',
         );
@@ -52,13 +50,10 @@ class RelationService
 
         $summary_response = $this->http->post(
             url: self::RELATION_SUMMARY_ENDPOINT,
-            data: [
-                "tenantId" => "demo",
-                "mobile" => "13800000002",
-                "memberType" => "NORMAL",
+            data: array_merge($identity, [
                 "asOfDate" => $todayDay,
                 "relationType" => "DIRECT"
-            ],
+            ]),
             isSuccessful: static fn (Response $summary_response): bool => $summary_response->successful(),
             service: 'relations_summary',
         );
@@ -74,7 +69,7 @@ class RelationService
 //           'relations' => $relations_data,
 //        ];
         return [
-            'mobile' => '13800000002',
+            'mobile' => $identity['mobile'],
             'parent_mobile' => $summary_data['parentMobile'] ?? '',
             'today_fans_count' => 0,
             'total_fans_count' => $summary_data['memberCount'] ?? '0',
@@ -93,22 +88,20 @@ class RelationService
      * @param  int  $pagesize  每页数量
      * @return array<string, mixed> 粉丝团分页数据
      */
-    public function getFansList(int $page, int $pagesize): array
+    public function getFansList(int $page, int $pagesize, array $user, string $token): array
     {
 
         $todayDay = date('Y-m-d', strtotime('-1 day'));
+        $identity = $this->identityParameters($user, $token);
         $response = $this->http->post(
             url: self::RELATION_RELATIONS_DETAILS,
-            data: [
-                'tenantId' => 'demo',
-                'mobile' => '13800000002',
-                'memberType' => 'NORMAL',
+            data: array_merge($identity, [
                 'asOfDate' => $todayDay,
 //                'asOfDate' => '2026-10-27',
                 'relationType' => 'DIRECT',
                 'pageNo' => $page,
                 'pageSize' => $pagesize,
-            ],
+            ]),
             isSuccessful: static fn (Response $response): bool => $response->successful(),
             service: 'relations_details',
         );
@@ -149,21 +142,19 @@ class RelationService
      * @param  int  $pagesize  每页数量
      * @return array<string, mixed> 团队会员分页数据
      */
-    public function getTeamList(int $page, int $pagesize): array
+    public function getTeamList(int $page, int $pagesize, array $user, string $token): array
     {
         $todayDay = date('Y-m-d', strtotime('-1 day'));
+        $identity = $this->identityParameters($user, $token);
         $response = $this->http->post(
             url: self::RELATION_RELATIONS_DETAILS,
-            data: [
-                'tenantId' => 'demo',
-                'mobile' => '13800000002',
-                'memberType' => 'NORMAL',
+            data: array_merge($identity, [
                 'asOfDate' => $todayDay,
 //                'asOfDate' => '2026-10-27',
                 'relationType' => 'NETWORK',
                 'pageNo' => $page,
                 'pageSize' => $pagesize,
-            ],
+            ]),
             isSuccessful: static fn (Response $response): bool => $response->successful(),
             service: 'relations_details',
         );
@@ -204,20 +195,18 @@ class RelationService
      *
      * @throws RuntimeException 上游请求失败或未返回数据时抛出
      */
-    public function getTeamStatistics(): array
+    public function getTeamStatistics(array $user, string $token): array
     {
         $todayDay = date('Y-m-d', strtotime('-1 day'));
+        $identity = $this->identityParameters($user, $token);
         $relations_response = $this->http->post(
             url: self::RELATION_RELATIONS_DETAILS,
-            data: [
-                "tenantId" => "demo",
-                "mobile" => "13800000002",
-                "memberType" => "NORMAL",
+            data: array_merge($identity, [
                 "asOfDate" => $todayDay,
                 "relationType" => "NETWORK",
                 "pageNo" => 1,
                 "pageSize" => 1
-            ],
+            ]),
             isSuccessful: static fn (Response $relations_response): bool => $relations_response->successful(),
             service: 'relations_details',
         );
@@ -229,13 +218,10 @@ class RelationService
 
         $summary_response = $this->http->post(
             url: self::RELATION_SUMMARY_ENDPOINT,
-            data: [
-                "tenantId" => "demo",
-                "mobile" => "13800000002",
-                "memberType" => "NORMAL",
+            data: array_merge($identity, [
                 "asOfDate" => $todayDay,
                 "relationType" => "NETWORK"
-            ],
+            ]),
             isSuccessful: static fn (Response $summary_response): bool => $summary_response->successful(),
             service: 'relations_summary',
         );
@@ -248,7 +234,7 @@ class RelationService
 //        return $data;
         return [
 //            'member_id' => 40,
-            'mobile' => '13800000002',
+            'mobile' => $identity['mobile'],
             'today_team_member_count' => $relations_data['totalExchangeAmount'] ?? '0.00',
             'today_team_trade_amount' => $relations_data['maxExchangeAmount'] ?? '0.00',
             'today_team_reward_amount' => $relations_data['remainingExchangeAmount'] ?? '0.00',
@@ -262,33 +248,39 @@ class RelationService
      *
      * @return array<string, int|bool> 兑换额统计数据
      */
-    public function getExchangeStatistics(): array
+    public function getExchangeStatistics(array $user, string $token): array
     {
         $todayDay = date('Y-m-d');
 //        $todayDay = '2026-10-27';
+        $identity = $this->identityParameters($user, $token);
 
         $response = $this->http->post(
             url: '/api/v1/computing/query/relations/network/flows',
-            data: [
-                'tenantId' => 'demo',
-                'mobile' => '13800000002',
-                'memberType' => 'NORMAL',
+            data: array_merge($identity, [
+                'token' => $token,
                 'asOfDate' => $todayDay,
                 'fromDate' => '2026-10-01',
                 'toDate' => $todayDay,
                 'pageNo' => 1,
                 'pageSize' => 1,
-            ],
+            ]),
             isSuccessful: static fn (Response $response): bool => $response->successful(),
             service: 'relations_network_flows',
         );
 
         $data = $response->json('data');
+        if ((string) $response->json('code') === '0004') {
+            return [
+                'total_exchange_amount' => '0.00',
+                'today_exchange_amount' => '0.00',
+                'has_exchange_permission' => false,
+            ];
+        }
+
         if (! is_array($data)) {
             throw new RuntimeException('关系流水接口未返回有效数据');
         }
 
-//        return $data;
         return [
             'total_exchange_amount' => $data['accumulatedExchangeAmount'] ?? '0.00',
             'today_exchange_amount' => $data['dailyExchangeAmount'] ?? '0.00',
@@ -301,23 +293,21 @@ class RelationService
      *
      * @return array<string, mixed> 兑换额记录数据
      */
-    public function getExchangeStatisticsList(string $startDate, string $endDate): array
+    public function getExchangeStatisticsList(string $startDate, string $endDate, array $user, string $token): array
     {
 //        $todayDay = date('Y-m-d');
 //        $todayDay = $endDate = '2026-10-27';
+        $identity = $this->identityParameters($user, $token);
 
         $response = $this->http->post(
             url: '/api/v1/computing/query/relations/network/flows',
-            data: [
-                'tenantId' => 'demo',
-                'mobile' => '13800000002',
-                'memberType' => 'NORMAL',
+            data: array_merge($identity, [
                 'asOfDate' => $endDate,
                 'fromDate' => $startDate,
                 'toDate' => $endDate,
                 'pageNo' => 1,
                 'pageSize' => 30,
-            ],
+            ]),
             isSuccessful: static fn (Response $response): bool => $response->successful(),
             service: 'relations_network_flows',
         );
@@ -366,6 +356,25 @@ class RelationService
             'pagesize' => $pagesize,
             'total' => $total,
             'data' => $items,
+        ];
+    }
+
+    /** @param array<string, mixed> $user @return array{tenantId: string, token: string, mobile: string, memberType: string} */
+    private function identityParameters(array $user, string $token): array
+    {
+        $mobile = trim((string) ($user['mobile'] ?? ''));
+        $memberType = trim((string) ($user['memberType'] ?? $user['member_type'] ?? ''));
+        $token = trim($token);
+
+        if ($mobile === '' || $memberType === '' || $token === '') {
+            throw new RuntimeException('登录用户信息不完整');
+        }
+
+        return [
+            'tenantId' => 'demo',
+            'token' => $token,
+            'mobile' => $mobile,
+            'memberType' => $memberType,
         ];
     }
 }
