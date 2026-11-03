@@ -269,7 +269,8 @@ class RelationService
         );
 
         $data = $response->json('data');
-        if ((string) $response->json('code') === '0004') {
+        //判断有无兑换额详情权限 true有 false无
+        if ((string) $response->json('code') === '0020') {
             return [
                 'total_exchange_amount' => '0.00',
                 'today_exchange_amount' => '0.00',
