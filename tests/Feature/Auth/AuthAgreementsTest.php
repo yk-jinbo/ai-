@@ -116,6 +116,29 @@ class AuthAgreementsTest extends TestCase
         Http::assertNothingSent();
     }
 
+    /** @return array<string, array{string}> 仅允许 GET 的协议查询地址 */
+    public static function agreementReadPaths(): array
+    {
+        return [
+            'policy' => ['/api/auth/agreements/policy?scene=LOGIN&member_type=NORMAL'],
+            'version' => ['/api/auth/agreements/versions?version_id=11'],
+        ];
+    }
+
+    /**
+     * 请求方式错误时明确提示允许的方法，不伪装成服务故障或调用上游。
+     *
+     * @param  string  $path  协议查询地址
+     * @return void 验证方法错误的状态码、允许的方法及统一响应
+     */
+    #[DataProvider('agreementReadPaths')]
+    public function test_post_requests_report_the_allowed_method(string $path): void
+    {
+        $this->postJson($path)->assertStatus(405)->assertHeader('Allow', 'GET, HEAD')
+            ->assertExactJson(['code' => -1, 'message' => '请求方法不支持，请使用 GET, HEAD', 'data' => null]);
+        Http::assertNothingSent();
+    }
+
     /** @return array<string, array{array<string, mixed>}> 不完整或不符合格式的同意信息 */
     public static function invalidConsents(): array
     {
