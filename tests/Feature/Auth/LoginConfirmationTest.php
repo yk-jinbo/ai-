@@ -4,6 +4,7 @@ namespace Tests\Feature\Auth;
 
 use App\Caches\CacheManager;
 use App\Helpers\ResponseHelper;
+use App\Services\LoginCaptchaService;
 use Illuminate\Contracts\Redis\Factory;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Http\Client\Request as ClientRequest;
@@ -128,7 +129,7 @@ class LoginConfirmationTest extends TestCase
     }
 
     /**
-     * 身份确认响应中的手机号进入本地用户缓存，业务接口可通过 currentUser() 读取。
+     * 短信登录填写的手机号覆盖上游返回值，并进入本地用户缓存供 currentUser() 读取。
      */
     public function test_confirm_response_mobile_is_available_from_current_user(): void
     {
@@ -157,12 +158,56 @@ class LoginConfirmationTest extends TestCase
             'agreement_consent' => $this->agreementConsent(),
         ])->assertStatus(200)->assertJson([
             'code' => 0,
-            'data' => ['user' => ['id' => 8, 'mobile' => '13900001111']],
+            'data' => ['user' => ['id' => 8, 'mobile' => '13812345678']],
         ]);
 
         $this->withToken($token)->getJson('/api/test/member')->assertStatus(200)->assertJson([
             'code' => 0,
-            'data' => ['id' => 8, 'mobile' => '13900001111'],
+            'data' => ['id' => 8, 'mobile' => '13812345678'],
+        ]);
+    }
+
+    /**
+     * 密码登录以填写的手机号账号关联票据，确认后写入用户响应与 currentUser()。
+     */
+    public function test_password_login_mobile_is_saved_after_identity_confirmation(): void
+    {
+        $token = str_repeat('p', 64);
+        $captcha = Mockery::mock(LoginCaptchaService::class);
+        $captcha->shouldReceive('verify')->once()->with('test-captcha-id', 120);
+        $this->app->instance(LoginCaptchaService::class, $captcha);
+        Http::fake([
+            'https://identity.example.test/api-iam/api/v1/member/login/prepare' => Http::response([
+                'code' => 'OK',
+                'msg' => 'ok',
+                'data' => ['ticket' => 'password-login-ticket', 'memberTypes' => ['NORMAL']],
+            ]),
+            'https://identity.example.test/api-iam/api/v1/member/login/confirm' => Http::response([
+                'code' => 'OK',
+                'msg' => 'ok',
+                'data' => ['accessToken' => $token, 'expiresIn' => 1800, 'user' => ['id' => 10]],
+            ]),
+        ]);
+
+        $this->postJson('/api/auth/login/password', [
+            'account' => '13712345678',
+            'password' => 'test-password',
+            'captcha_id' => 'test-captcha-id',
+            'offset_x' => 120,
+        ])->assertStatus(200)->assertJson(['code' => 0, 'data' => ['ticket' => 'password-login-ticket']]);
+
+        $this->postJson('/api/auth/login/confirm', [
+            'ticket' => 'password-login-ticket',
+            'member_type' => 'NORMAL',
+            'agreement_consent' => $this->agreementConsent(),
+        ])->assertStatus(200)->assertJson([
+            'code' => 0,
+            'data' => ['user' => ['id' => 10, 'mobile' => '13712345678']],
+        ]);
+
+        $this->withToken($token)->getJson('/api/test/member')->assertStatus(200)->assertJson([
+            'code' => 0,
+            'data' => ['id' => 10, 'mobile' => '13712345678'],
         ]);
     }
 
