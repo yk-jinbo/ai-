@@ -19,28 +19,18 @@ class AssetService
 
     private const DEFAULT_PAGE_SIZE = 20;
 
-    private const SUMMARY_TEST_PARAMETERS = [
-        'tenantId' => 'demo',
-        'mobile' => '13800000002',
-        'memberType' => 'NORMAL',
-    ];
-
-    private const RECORDS_TEST_PARAMETERS = [
-        'tenantId' => 'demo',
-        'mobile' => '13800000002',
-        'memberType' => 'NORMAL',
-    ];
-
     /**
      * 注入通用外部请求客户端
      *
      * 业务逻辑：复用统一的网关校验、超时、请求标识和失败日志能力。
      *
      * @param  ExternalHttpClient  $http  通用外部请求客户端
+     * @param  MemberIdentityParameters  $memberIdentityParameters  第三方会员身份参数组装器
      * @return void
      */
     public function __construct(
         private ExternalHttpClient $http,
+        private MemberIdentityParameters $memberIdentityParameters,
     ) {}
 
     /**
@@ -48,14 +38,15 @@ class AssetService
      *
      * 业务逻辑：使用公共资产参数组装方法发送报文，确认业务成功后仅返回约定资产字段。
      *
-     * @param  array<string, mixed>  $requestParameters  当前请求参数（联调阶段仅用于覆盖测试身份字段）
+     * @param  array<string, mixed>  $member  当前令牌对应的登录用户信息
+     * @param  string  $token  当前请求中的上游会员令牌
      * @return Collection<string, array<int, array{assetType: string, obtainedQuantity: string|null, visible: bool|null}>> 标准化资产汇总
      *
      * @throws \Throwable 第三方接口不可用、业务失败或响应格式异常时抛出
      */
-    public function summary(array $requestParameters = []): Collection
+    public function summary(array $member, string $token): Collection
     {
-        $summaryParameters = $this->summaryParameters($requestParameters);
+        $summaryParameters = $this->summaryParameters($member, $token);
         $response = $this->http->post(
             url: (string) config('services.asset_summary.url'),
             data: $summaryParameters,
@@ -74,41 +65,18 @@ class AssetService
     /**
      * 组装汇总接口身份参数。
      *
-     * 业务逻辑：第三方汇总接口不接受前端分页等参数；联调阶段使用测试身份，
-     * 后续接入登录 Token 时仅替换这里的身份来源。
+     * 业务逻辑：身份字段和令牌来自当前登录会话，统计日期由服务端生成。
      *
-     * @param  array<string, mixed>  $requestParameters  前端原始请求参数
-     * @return array{tenantId: string, mobile: string, memberType: string, asOfDate: string} 第三方汇总参数
+     * @param  array<string, mixed>  $member  当前令牌对应的登录用户信息
+     * @param  string  $token  当前请求中的上游会员令牌
+     * @return array{token: string, mobile: string, memberType: string, asOfDate: string} 第三方汇总参数
      */
-    private function summaryParameters(array $requestParameters): array
+    private function summaryParameters(array $member, string $token): array
     {
-        $parameters = self::SUMMARY_TEST_PARAMETERS;
-
-        foreach (array_keys($parameters) as $field) {
-            if (isset($requestParameters[$field]) && is_scalar($requestParameters[$field])) {
-                $parameters[$field] = (string) $requestParameters[$field];
-            }
-        }
-
-        return $this->assetParameters(
-            $parameters,
+        return array_merge(
+            $this->memberIdentityParameters->make($member, $token),
             ['asOfDate' => now()->toDateString()],
         );
-    }
-
-    /**
-     * 组装资产接口公共参数。
-     *
-     * 业务逻辑：所有资产第三方接口都必须携带租户、手机号和会员类型；
-     * 调用方只需传入当前接口额外参数，额外参数允许覆盖默认联调值。
-     *
-     * @param  array{tenantId: string, mobile: string, memberType: string}  $requiredParameters  当前用户的公共身份参数
-     * @param  array<string, mixed>  $optionalParameters  当前接口的可选参数
-     * @return array<string, mixed> 包含公共必填参数的第三方请求参数
-     */
-    private function assetParameters(array $requiredParameters, array $optionalParameters = []): array
-    {
-        return array_merge($requiredParameters, $optionalParameters);
     }
 
     /**
@@ -116,16 +84,18 @@ class AssetService
      *
      * 业务逻辑：组合联调身份、日期范围、分页和可选筛选项，查询第三方资产流水。
      *
+     * @param  array<string, mixed>  $member  当前令牌对应的登录用户信息
+     * @param  string  $token  当前请求中的上游会员令牌
      * @param  array<string, mixed>  $filters  已校验的资产流水筛选条件
      * @return Collection<string, mixed> 标准化资产余额、流水和分页数据
      *
      * @throws \Throwable 第三方接口不可用、业务失败或响应格式异常时抛出
      */
-    public function records(array $filters): Collection
+    public function records(array $member, string $token, array $filters): Collection
     {
         $response = $this->http->post(
             url: (string) config('services.asset_records.url'),
-            data: $this->recordsUpstreamParameters($filters),
+            data: $this->recordsUpstreamParameters($member, $token, $filters),
             isSuccessful: fn (Response $response): bool => $this->isSuccessful($response),
             service: 'asset_records',
         );
@@ -136,13 +106,15 @@ class AssetService
     /**
      * 组装第三方资产流水查询参数
      *
+     * @param  array<string, mixed>  $member  当前令牌对应的登录用户信息
+     * @param  string  $token  当前请求中的上游会员令牌
      * @param  array<string, mixed>  $filters  已校验的资产流水筛选条件
      * @return array<string, int|string> 第三方资产流水查询参数
      *
      */
-    private function recordsUpstreamParameters(array $filters): array
+    private function recordsUpstreamParameters(array $member, string $token, array $filters): array
     {
-        $parameters = self::RECORDS_TEST_PARAMETERS;
+        $parameters = $this->memberIdentityParameters->make($member, $token);
         $parameters['fromDate'] = (string) $filters['fromDate'];
         $parameters['toDate'] = (string) $filters['toDate'];
         $parameters['pageNo'] = (int) ($filters['pageNo'] ?? self::DEFAULT_PAGE_NO);
@@ -154,33 +126,7 @@ class AssetService
             }
         }
 
-        return $this->assetParameters($parameters);
-    }
-
-    /**
-     * 从登录会员信息提取第三方接口身份参数
-     *
-     * @param  array<string, mixed>  $member  Token 对应的登录会员信息
-     * @return array{tenantId: string, mobile: string, memberType: string} 第三方会员身份参数
-     *
-     * @throws \Exception 登录会员信息缺少第三方查询必需字段时抛出
-     */
-    private function memberParameters(array $member): array
-    {
-        $tenantId = trim((string) ($member['tenantId'] ?? $member['tenant_id'] ?? ''));
-        $mobile = trim((string) ($member['mobile'] ?? ''));
-        $memberType = trim((string) ($member['memberType'] ?? $member['member_type'] ?? ''));
-
-        ResponseHelper::errorIf(
-            $tenantId === '' || $mobile === '' || $memberType === '',
-            '登录用户信息不完整',
-        );
-
-        return [
-            'tenantId' => $tenantId,
-            'mobile' => $mobile,
-            'memberType' => $memberType,
-        ];
+        return $parameters;
     }
 
     /**

@@ -4,6 +4,7 @@ namespace App\Http\Controllers\Api\Asset;
 
 use App\Helpers\ResponseHelper;
 use App\Http\Controllers\Controller;
+use App\Http\Middleware\AuthenticateMemberToken;
 use App\Http\Requests\AssetRequest;
 use App\Services\AssetService;
 use Illuminate\Http\JsonResponse;
@@ -33,18 +34,21 @@ class AssetController extends Controller
     /**
      * 获取会员资产汇总
      *
-     * 业务逻辑：把当前请求的公共身份参数交给 Service 查询第三方资产接口。
+     * 业务逻辑：从前端令牌读取登录用户，并把用户、原令牌和请求参数交给资产服务。
      *
-     * @param  Request  $request  资产汇总请求
+     * @param  Request  $request  含 Bearer Token 的资产汇总请求
      * @return JsonResponse 统一结构的资产汇总响应
      *
      * @throws \Throwable 第三方接口不可用、业务失败或响应格式异常时向上抛出
      */
-    #[Post('/asset/summary', name: 'api.asset.summary')]
+    #[Post('/asset/summary', name: 'api.asset.summary', middleware: [AuthenticateMemberToken::class])]
     public function summary(Request $request): JsonResponse
     {
+        $user = $request->attributes->get('member_auth_user', []);
+        $user = is_array($user) ? $user : [];
+
         return ResponseHelper::success(
-            $this->assetService->summary($request->all()),
+            $this->assetService->summary($user, (string) $request->bearerToken()),
             '资产汇总查询成功',
         );
     }
@@ -52,18 +56,25 @@ class AssetController extends Controller
     /**
      * 获取会员资产流水
      *
-     * 业务逻辑：读取已认证会员信息和已校验筛选条件，交给 Service 查询第三方资产流水。
+     * 业务逻辑：读取 Token 对应的登录用户和已校验筛选条件，交给 Service 查询第三方资产流水。
      *
      * @param  AssetRequest  $request  资产流水请求
      * @return JsonResponse 统一结构的资产流水响应
      *
      * @throws \Throwable 第三方接口不可用、业务失败或响应格式异常时向上抛出
      */
-    #[Post('/assets/records', name: 'api.assets.records')]
+    #[Post('/assets/records', name: 'api.assets.records', middleware: [AuthenticateMemberToken::class])]
     public function records(AssetRequest $request): JsonResponse
     {
+        $member = $request->attributes->get('member_auth_user', []);
+        $member = is_array($member) ? $member : [];
+
         return ResponseHelper::success(
-            $this->assetService->records($request->validated()),
+            $this->assetService->records(
+                $member,
+                (string) $request->bearerToken(),
+                $request->validated(),
+            ),
             '资产流水查询成功',
         );
     }

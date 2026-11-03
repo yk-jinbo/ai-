@@ -13,12 +13,6 @@ class AssessmentService
 {
     private const UPSTREAM_SUCCESS_CODE = '0000';
 
-    private const INFO_TEST_PARAMETERS = [
-        'tenantId' => 'demo',
-        'mobile' => '13800000002',
-        'memberType' => 'NORMAL',
-    ];
-
     /**
      * 注入通用外部请求客户端
      *
@@ -27,6 +21,7 @@ class AssessmentService
      */
     public function __construct(
         private ExternalHttpClient $http,
+        private MemberIdentityParameters $memberIdentityParameters,
     ) {}
 
     /**
@@ -65,18 +60,20 @@ class AssessmentService
     /**
      * 按业务类型查询对应的第三方考核信息
      *
+     * @param  array<string, mixed>  $member 当前 Token 对应的登录用户
+     * @param  string  $token 当前请求中的会员 Token
      * @param  array<string, mixed>  $parameters 考核查询参数，包含业务类型和可选业务字段
      * @return array<string, mixed> 第三方考核信息
      * @throws \Throwable 上游未配置、调用失败或响应格式异常时抛出
      */
-    public function assessmentInfo(array $parameters): array
+    public function assessmentInfo(array $member, string $token, array $parameters): array
     {
         $businessType = (string) $parameters['businessType'];
         unset($parameters['businessType']);
         $url = config('services.assessment_info.urls.'.$businessType);
         ResponseHelper::errorIf(! is_string($url) || trim($url) === '', '该业务类型的第三方接口尚未配置');
 
-        $upstreamParameters = array_merge($parameters, self::INFO_TEST_PARAMETERS);
+        $upstreamParameters = array_merge($parameters, $this->memberIdentityParameters->make($member, $token));
 
         $response = $this->http->post(
             url: $url,

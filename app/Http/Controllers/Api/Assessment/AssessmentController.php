@@ -4,6 +4,7 @@ namespace App\Http\Controllers\Api\Assessment;
 
 use App\Helpers\ResponseHelper;
 use App\Http\Controllers\Controller;
+use App\Http\Middleware\AuthenticateMemberToken;
 use App\Http\Requests\AssessmentRequest;
 use App\Services\AssessmentService;
 use Illuminate\Http\JsonResponse;
@@ -43,11 +44,18 @@ class AssessmentController extends Controller
         );
     }
 
-    #[Post('/assessment/assessment-info', name: 'api.assessment.assessment-info')]
+    #[Post('/assessment/assessment-info', name: 'api.assessment.assessment-info', middleware: [AuthenticateMemberToken::class])]
     public function assessmentInfo(AssessmentRequest $request): JsonResponse
     {
+        $member = $request->attributes->get('member_auth_user', []);
+        $member = is_array($member) ? $member : [];
+
         return ResponseHelper::success(
-            $this->assessmentService->assessmentInfo($request->validated()),
+            $this->assessmentService->assessmentInfo(
+                $member,
+                (string) $request->bearerToken(),
+                $request->validated(),
+            ),
             '查询成功',
         );
     }

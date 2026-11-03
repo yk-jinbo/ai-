@@ -2,11 +2,15 @@
 
 namespace Tests\Feature\Assessment;
 
+use App\Caches\CacheManager;
 use App\Enums\ApiCode;
 use App\Enums\AssetBusinessType;
+use Illuminate\Contracts\Redis\Factory;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Http\Client\Request;
+use Illuminate\Redis\Connections\Connection;
 use Illuminate\Support\Facades\Http;
+use Mockery;
 use Tests\TestCase;
 
 /**
@@ -22,6 +26,28 @@ class AssessmentTest extends TestCase
     private const PERSONAL_SUMMARY_URL = 'https://assets.example.test/api/v1/computing/query/trades/personal/summary';
 
     private const DIRECT_SUMMARY_URL = 'https://assets.example.test/api/v1/computing/query/trades/direct/summary';
+
+    private const TOKEN = 'assessment-access-token';
+
+    /** @var array<string, string> */
+    private array $redisValues = [];
+
+    protected function setUp(): void
+    {
+        parent::setUp();
+        config()->set('cache.hash_key', 'assessment-test-only-key');
+        $redis = Mockery::mock(Connection::class);
+        $redis->shouldReceive('get')->andReturnUsing(fn (string $key): ?string => $this->redisValues[$key] ?? null);
+        $factory = Mockery::mock(Factory::class);
+        $factory->shouldReceive('connection')->with('cache')->andReturn($redis);
+        $this->app->instance(Factory::class, $factory);
+
+        $scope = $this->app->make(CacheManager::class)->scope('auth-tokens');
+        $this->redisValues[$scope->key(self::TOKEN)] = json_encode([
+            'user' => ['mobile' => '13900001111', 'member_type' => 'NORMAL'],
+        ], JSON_THROW_ON_ERROR | JSON_UNESCAPED_UNICODE);
+        Http::preventStrayRequests();
+    }
 
     /**
      * 验证接口使用空 POST 请求并返回第三方业务类型列表
@@ -125,7 +151,7 @@ class AssessmentTest extends TestCase
             ]),
         ]);
 
-        $response = $this->postJson('/api/assessment/assessment-info', [
+        $response = $this->withToken(self::TOKEN)->postJson('/api/assessment/assessment-info', [
             'businessType' => 'MEMBER_TRADE',
             'orgId' => 30002,
             'asOfDate' => '2026-11-02',
@@ -137,8 +163,8 @@ class AssessmentTest extends TestCase
             && $request->data() === [
                 'asOfDate' => '2026-11-02',
                 'orgId' => 30002,
-                'tenantId' => 'demo',
-                'mobile' => '13800000002',
+                'token' => self::TOKEN,
+                'mobile' => '13900001111',
                 'memberType' => 'NORMAL',
             ]);
     }
@@ -159,7 +185,7 @@ class AssessmentTest extends TestCase
             ]),
         ]);
 
-        $response = $this->postJson('/api/assessment/assessment-info', ['businessType' => 'DIRECT_TRADE']);
+        $response = $this->withToken(self::TOKEN)->postJson('/api/assessment/assessment-info', ['businessType' => 'DIRECT_TRADE']);
 
         $response->assertOk()->assertJsonPath('data.assets', []);
         Http::assertSent(fn (Request $request): bool => $request->url() === self::DIRECT_SUMMARY_URL);
@@ -182,7 +208,7 @@ class AssessmentTest extends TestCase
             ]),
         ]);
 
-        $response = $this->postJson('/api/assessment/assessment-info', [
+        $response = $this->withToken(self::TOKEN)->postJson('/api/assessment/assessment-info', [
             'businessType' => 'BRANCH_COMPANY',
             'orgId' => 30002,
         ]);
@@ -191,8 +217,8 @@ class AssessmentTest extends TestCase
         Http::assertSent(fn (Request $request): bool => $request->url() === $url
             && $request->data() === [
                 'orgId' => 30002,
-                'tenantId' => 'demo',
-                'mobile' => '13800000002',
+                'token' => self::TOKEN,
+                'mobile' => '13900001111',
                 'memberType' => 'NORMAL',
             ]);
     }
@@ -214,7 +240,7 @@ class AssessmentTest extends TestCase
             ]),
         ]);
 
-        $response = $this->postJson('/api/assessment/assessment-info', [
+        $response = $this->withToken(self::TOKEN)->postJson('/api/assessment/assessment-info', [
             'businessType' => 'MERCHANT_COMPANY',
             'merchantId' => 40001,
         ]);
@@ -223,8 +249,8 @@ class AssessmentTest extends TestCase
         Http::assertSent(fn (Request $request): bool => $request->url() === $url
             && $request->data() === [
                 'merchantId' => 40001,
-                'tenantId' => 'demo',
-                'mobile' => '13800000002',
+                'token' => self::TOKEN,
+                'mobile' => '13900001111',
                 'memberType' => 'NORMAL',
             ]);
     }
@@ -246,7 +272,7 @@ class AssessmentTest extends TestCase
             ]),
         ]);
 
-        $response = $this->postJson('/api/assessment/assessment-info', [
+        $response = $this->withToken(self::TOKEN)->postJson('/api/assessment/assessment-info', [
             'businessType' => 'AGENT',
             'fromDate' => '2026-10-01',
             'toDate' => '2026-10-27',
@@ -261,8 +287,8 @@ class AssessmentTest extends TestCase
                 'toDate' => '2026-10-27',
                 'pageNo' => 1,
                 'pageSize' => 20,
-                'tenantId' => 'demo',
-                'mobile' => '13800000002',
+                'token' => self::TOKEN,
+                'mobile' => '13900001111',
                 'memberType' => 'NORMAL',
             ]);
     }
@@ -276,7 +302,7 @@ class AssessmentTest extends TestCase
     {
         Http::fake();
 
-        $response = $this->postJson('/api/assessment/assessment-info', ['businessType' => 'UNKNOWN']);
+        $response = $this->withToken(self::TOKEN)->postJson('/api/assessment/assessment-info', ['businessType' => 'UNKNOWN']);
 
         $response->assertStatus(422)->assertJsonPath('code', ApiCode::INVALID_PARAMS->value);
         Http::assertNothingSent();

@@ -18,7 +18,7 @@ class AssetRequest extends FormRequest
     /**
      * 判断当前请求是否允许进入参数校验
      *
-     * 业务逻辑：汇总接口当前用于第三方联调，不验证前端 Token；流水接口认证由路由中间件处理。
+     * 业务逻辑：资产流水接口认证由路由中间件处理。
      *
      * @return bool 始终返回 true
      */
