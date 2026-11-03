@@ -104,6 +104,53 @@ class AssetService
     }
 
     /**
+     * 查询指定机构的资产净流入记录
+     *
+     * @param  array<string, mixed>  $member  当前令牌对应的登录用户信息
+     * @param  string  $token  当前请求中的上游会员令牌
+     * @param  array<string, mixed>  $filters  已校验的净流入记录筛选条件
+     * @return Collection<string, mixed> 第三方净流入记录数据
+     *
+     * @throws \Throwable 第三方接口不可用、业务失败或响应格式异常时抛出
+     */
+    public function netInflowRecords(array $member, string $token, array $filters): Collection
+    {
+        $response = $this->http->post(
+            url: (string) config('services.asset_net_inflow_records.url'),
+            data: $this->netInflowRecordParameters($member, $token, $filters),
+            isSuccessful: fn (Response $response): bool => $this->isSuccessful($response),
+            service: 'asset_net_inflow_records',
+        );
+
+        return collect($this->validatedResponseData($response));
+    }
+
+    /**
+     * 组装第三方资产净流入记录查询参数
+     *
+     * @param  array<string, mixed>  $member  当前令牌对应的登录用户信息
+     * @param  string  $token  当前请求中的上游会员令牌
+     * @param  array<string, mixed>  $filters  已校验的筛选条件
+     * @return array<string, int|string> 第三方净流入记录查询参数
+     */
+    private function netInflowRecordParameters(array $member, string $token, array $filters): array
+    {
+        return array_merge(
+            $this->memberIdentityParameters->make($member, $token),
+            [
+                'asOfDate' => (string) ($filters['asOfDate'] ?? now()->toDateString()),
+                'assessmentType' => (string) $filters['assessmentType'],
+                'orgId' => (string) $filters['orgId'],
+                'periodType' => (string) $filters['periodType'],
+                'fromDate' => (string) $filters['fromDate'],
+                'toDate' => (string) $filters['toDate'],
+                'pageNo' => (int) ($filters['pageNo'] ?? self::DEFAULT_PAGE_NO),
+                'pageSize' => (int) ($filters['pageSize'] ?? self::DEFAULT_PAGE_SIZE),
+            ],
+        );
+    }
+
+    /**
      * 组装第三方资产流水查询参数
      *
      * @param  array<string, mixed>  $member  当前令牌对应的登录用户信息

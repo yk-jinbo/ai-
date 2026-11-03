@@ -4,6 +4,8 @@ namespace App\Http\Requests;
 
 use App\Enums\AssetAssessmentPeriodType;
 use App\Enums\AssetBusinessType;
+use App\Enums\AssetNetInflowAssessmentType;
+use App\Enums\AssetNetInflowPeriodType;
 use App\Enums\AssetType;
 use Illuminate\Foundation\Http\FormRequest;
 use Illuminate\Validation\Rule;
@@ -40,6 +42,7 @@ class AssetRequest extends FormRequest
     {
         return match ($this->controllerAction()) {
             'records' => $this->rulesForRecords(),
+            'netInflowRecords' => $this->rulesForNetInflowRecords(),
             default => throw new LogicException('AssetRequest 未配置当前 Controller 动作的校验规则'),
         };
     }
@@ -67,6 +70,14 @@ class AssetRequest extends FormRequest
             'businessType.enum' => '业务来源类型不正确',
             'assetType.enum' => '资产类型不正确',
             'assessmentPeriodType.enum' => '考核周期类型不正确',
+            'asOfDate.date_format' => '统计日期格式必须为 YYYY-MM-DD',
+            'assessmentType.required' => '考核类型不能为空',
+            'assessmentType.enum' => '考核类型不正确',
+            'orgId.required' => '机构 ID 不能为空',
+            'orgId.integer' => '机构 ID 必须是整数',
+            'orgId.min' => '机构 ID 必须大于 0',
+            'periodType.required' => '周期类型不能为空',
+            'periodType.enum' => '周期类型不正确',
         ];
     }
 
@@ -87,6 +98,10 @@ class AssetRequest extends FormRequest
             'businessType' => '业务来源类型',
             'assetType' => '资产类型',
             'assessmentPeriodType' => '考核周期类型',
+            'asOfDate' => '统计日期',
+            'assessmentType' => '考核类型',
+            'orgId' => '机构 ID',
+            'periodType' => '周期类型',
         ];
     }
 
@@ -105,6 +120,25 @@ class AssetRequest extends FormRequest
             'businessType' => ['nullable', Rule::enum(AssetBusinessType::class)],
             'assetType' => ['nullable', Rule::enum(AssetType::class)],
             'assessmentPeriodType' => ['nullable', Rule::enum(AssetAssessmentPeriodType::class)],
+        ];
+    }
+
+    /**
+     * 返回资产净流入记录查询规则
+     *
+     * @return array<string, mixed> 资产净流入记录字段校验规则
+     */
+    private function rulesForNetInflowRecords(): array
+    {
+        return [
+            'asOfDate' => ['nullable', 'date_format:Y-m-d'],
+            'assessmentType' => ['required', Rule::enum(AssetNetInflowAssessmentType::class)],
+            'orgId' => ['required', 'integer', 'min:1'],
+            'periodType' => ['required', Rule::enum(AssetNetInflowPeriodType::class)],
+            'fromDate' => ['required', 'date_format:Y-m-d'],
+            'toDate' => ['required', 'date_format:Y-m-d', 'after_or_equal:fromDate'],
+            'pageNo' => ['nullable', 'integer', 'min:1'],
+            'pageSize' => ['nullable', 'integer', 'min:1', 'max:100'],
         ];
     }
 

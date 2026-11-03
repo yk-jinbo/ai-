@@ -11,6 +11,7 @@ $assetBaseUrl = rtrim((string) env('ASSET_API_BASE_URL'), '/');
 $assetBaseUrl = $assetBaseUrl !== '' ? $assetBaseUrl : $memberAuthBaseUrl;
 $assetSummaryUrl = trim((string) env('ASSET_SUMMARY_URL'));
 $assetRecordsUrl = trim((string) env('ASSET_RECORDS_URL'));
+$assetNetInflowRecordsUrl = trim((string) env('ASSET_NET_INFLOW_RECORDS_URL'));
 $businessTypesUrl = trim((string) env('BUSINESS_TYPES_URL'));
 $assessmentInfoBaseUrl = $assetBaseUrl;
 $assessmentInfoUrls = [
@@ -50,6 +51,9 @@ return [
         'records' => $assetRecordsUrl !== ''
             ? $assetRecordsUrl
             : $assetBaseUrl.'/api/v1/computing/query/assets/records',
+        'net_inflow_records' => $assetNetInflowRecordsUrl !== ''
+            ? $assetNetInflowRecordsUrl
+            : $assetBaseUrl.'/api/v1/computing/query/organizations/net-deposits',
     ],
 
     'assessment' => [

@@ -78,4 +78,28 @@ class AssetController extends Controller
             '资产流水查询成功',
         );
     }
+
+    /**
+     * 获取指定机构的资产净流入记录
+     *
+     * @param  AssetRequest  $request  已认证并完成参数校验的净流入记录请求
+     * @return JsonResponse 统一结构的资产净流入记录响应
+     *
+     * @throws \Throwable 第三方接口不可用、业务失败或响应格式异常时向上抛出
+     */
+    #[Post('/asset/net-inflow-records', name: 'api.asset.net-inflow-records', middleware: [AuthenticateMemberToken::class])]
+    public function netInflowRecords(AssetRequest $request): JsonResponse
+    {
+        $member = $request->attributes->get('member_auth_user', []);
+        $member = is_array($member) ? $member : [];
+
+        return ResponseHelper::success(
+            $this->assetService->netInflowRecords(
+                $member,
+                (string) $request->bearerToken(),
+                $request->validated(),
+            ),
+            '资产净流入记录查询成功',
+        );
+    }
 }
