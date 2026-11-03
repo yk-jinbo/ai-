@@ -4,6 +4,7 @@ namespace App\Http\Controllers\Api\Barter;
 
 use App\Helpers\ResponseHelper;
 use App\Http\Controllers\Controller;
+use App\Services\AuthTokenService;
 use App\Services\BarterService;
 use Illuminate\Http\JsonResponse;
 use Spatie\RouteAttributes\Attributes\Get;
@@ -31,10 +32,12 @@ class BarterController extends Controller
      * @return JsonResponse 统一结构的 barter 统计响应
      */
     #[Get('barter-statistics', name: 'api.barter.barter-statistics')]
-    public function barterStatistics(): JsonResponse
+    public function barterStatistics(AuthTokenService $authTokenService): JsonResponse
     {
+        $user = $authTokenService->currentUser();
+
         return ResponseHelper::success(
-            $this->barterService->getBarterStatistics(),
+            $this->barterService->getBarterStatistics($user),
             '获取成功',
         );
     }

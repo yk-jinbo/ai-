@@ -182,7 +182,7 @@ class RelationService
                 'member_name' => $item['member']['memberName'] ?? '',
 //                'member_avatar' => '111.jpg',
                 'today_exchange_amount' => $item['userDailyExchangeAmount'] ?? '0.00',
-                'total_exchange_amount' => $itme['memberDailyExchangeAmount'] ?? '0.00',
+                'total_exchange_amount' => $item['memberDailyExchangeAmount'] ?? '0.00',
             ];
         }
 

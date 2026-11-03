@@ -2,6 +2,7 @@
 
 namespace App\Services;
 
+use App\Helpers\ResponseHelper;
 use Illuminate\Http\Client\Response;
 use RuntimeException;
 
@@ -20,16 +21,25 @@ class BarterService
     /**
      * 获取 barter 统计示例数据。
      *
+     * @param  array<string, mixed>  $user  当前登录用户信息
      * @return array<string, string> 包含今日通用券和昨日兑换金额
      */
-    public function getBarterStatistics(): array
+    public function getBarterStatistics(array $user): array
     {
+        $mobile = trim((string) ($user['mobile'] ?? ''));
+        $memberType = trim((string) ($user['memberType'] ?? $user['member_type'] ?? ''));
+
+//        ResponseHelper::errorIf($mobile === '' || $memberType === '', '登录用户信息不完整');
+        if (empty($mobile) || empty($memberType)) {
+            throw new RuntimeException('登录用户信息不完整');
+        }
+
         $response = $this->http->post(
             url: self::HOME_INDICATORS_ENDPOINT,
             data: [
                 'tenantId' => 'demo',
-                'mobile' => '13800000002',
-                'memberType' => 'NORMAL',
+                'mobile' => $mobile,
+                'memberType' => $memberType,
             ],
             isSuccessful: static fn (Response $response): bool => $response->successful(),
             service: 'home_indicators',

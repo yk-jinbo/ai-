@@ -3,6 +3,7 @@
 namespace Tests\Feature\ExternalHttp;
 
 use App\Enums\ExternalGateway;
+use App\Services\AuthTokenService;
 use App\Services\ExternalAuthClient;
 use App\Services\ExternalHttpClient;
 use App\Services\BarterService;
@@ -103,19 +104,52 @@ class ExternalHttpClientTest extends TestCase
     public function test_barter_statistics_uses_home_indicators(): void
     {
         config()->set('services.external_http.gateways.default', 'http://192.168.11.202:8082');
-        $upstreamData = ['todayGeneralCoupon' => '121.11', 'yesterdayBarterAmount' => '999999.999'];
+        $upstreamData = ['tongbaoPrice' => '121.11', 'yesterdayTradeAmount' => '999999.999'];
         Http::fake(['*' => Http::response(['code' => 'OK', 'data' => $upstreamData])]);
 
-        $result = $this->app->make(BarterService::class)->getBarterStatistics();
+        $result = $this->app->make(BarterService::class)->getBarterStatistics([
+            'tenantId' => 'tenant-7',
+            'mobile' => '13812345678',
+            'member_type' => 'NORMAL',
+        ]);
 
-        $this->assertSame($upstreamData, $result);
+        $this->assertSame([
+            'today_general_coupon' => '121.11',
+            'yesterday_barter_amount' => '999999.999',
+        ], $result);
         Http::assertSent(function (ClientRequest $request): bool {
             return $request->method() === 'POST'
                 && $request->url() === 'http://192.168.11.202:8082/api/v1/computing/query/home/indicators'
                 && $request['tenantId'] === 'demo'
-                && $request['mobile'] === '13800000002'
+                && $request['mobile'] === '13812345678'
                 && $request['memberType'] === 'NORMAL';
         });
+    }
+
+    /** 验证 barter 控制器从当前 Bearer token 用户获取上游身份参数。 */
+    public function test_barter_statistics_uses_current_authenticated_user(): void
+    {
+        config()->set('services.external_http.gateways.default', 'http://192.168.11.202:8082');
+        $this->mock(AuthTokenService::class)
+            ->shouldReceive('currentUser')
+            ->once()
+            ->andReturn([
+                'tenantId' => 'tenant-9',
+                'mobile' => '13898765432',
+                'member_type' => 'PREMIUM',
+            ]);
+        Http::fake(['*' => Http::response(['code' => 'OK', 'data' => [
+            'tongbaoPrice' => '50.00',
+            'yesterdayTradeAmount' => '80.00',
+        ]])]);
+
+        $this->getJson('/api/barter/barter-statistics')
+            ->assertOk()
+            ->assertJsonPath('data.today_general_coupon', '50.00');
+
+        Http::assertSent(fn (ClientRequest $request): bool => $request['tenantId'] === 'demo'
+            && $request['mobile'] === '13898765432'
+            && $request['memberType'] === 'PREMIUM');
     }
 
     /** 验证团队列表将本地分页参数传给关系详情接口并返回上游 data。 */
