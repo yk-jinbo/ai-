@@ -76,7 +76,7 @@ class AuthController extends Controller
         $result = $this->authService->confirmLogin(
             $data['ticket'],
             $data['member_type'],
-            (bool) $data['agreement_accepted'],
+            (bool) ($data['agreement_accepted'] ?? false),
         );
 
         return ResponseHelper::success($result->data, $result->message);

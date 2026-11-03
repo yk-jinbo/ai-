@@ -52,11 +52,6 @@ class AuthService
         $result = $this->externalAuthClient->preparePasswordLogin($username, $password);
         $this->ensureSuccess($result, '账号或密码错误');
         $data = $this->normalizePrepareData($result->data);
-        $this->rememberPendingMobile(
-            $data['ticket'],
-            $this->resolveLoginMobile($username),
-            $data['expires_in'],
-        );
 
         return new AuthLoginResult(
             $data,
@@ -70,7 +65,6 @@ class AuthService
         $result = $this->externalAuthClient->prepareSmsLogin($mobile, $code);
         $this->ensureSuccess($result, '验证码错误或已过期');
         $data = $this->normalizePrepareData($result->data);
-        $this->rememberPendingMobile($data['ticket'], $mobile, $data['expires_in']);
 
         return new AuthLoginResult(
             $data,
@@ -81,14 +75,13 @@ class AuthService
     /** 选择身份并确认协议，保存上游令牌后返回旧项目登录字段。 */
     public function confirmLogin(string $ticket, string $memberType, bool $agreementAccepted): AuthLoginResult
     {
-        $pendingMobile = $this->authTokenService->pendingMobile($ticket);
         $result = $this->externalAuthClient->confirmLogin($ticket, $memberType, $agreementAccepted);
         $this->ensureSuccess($result, '登录确认失败');
 
         $data = $this->normalizeTokenData($result->data, $memberType);
         $token = (string) ($data['token'] ?? '');
         ResponseHelper::errorIf($token === '', '登录响应缺少访问令牌', ApiCode::ERROR);
-        $user = $this->storedUser($result->data, $data, $memberType, $pendingMobile);
+        $user = $this->storedUser($result->data, $data, $memberType);
         $data['user'] = $user;
 
         $this->authTokenService->store(
@@ -96,7 +89,6 @@ class AuthService
             $user,
             $data['expires_in'],
         );
-        $this->authTokenService->forgetPendingMobile($ticket);
 
         return new AuthLoginResult(
             $data,
@@ -188,21 +180,19 @@ class AuthService
      * @param  array<string, mixed>  $normalizedData
      * @return array<string, mixed>
      */
-    private function storedUser(
-        array $externalData,
-        array $normalizedData,
-        string $memberType,
-        ?string $pendingMobile = null,
-    ): array
+    private function storedUser(array $externalData, array $normalizedData, string $memberType): array
     {
         $user = $externalData['user']
             ?? $externalData['member']
             ?? $externalData['memberInfo']
             ?? $externalData['userInfo']
             ?? null;
+        $mobile = is_array($user)
+            ? $this->extractMobile($user) ?? $this->extractMobile($externalData)
+            : $this->extractMobile($externalData);
         if (is_array($user)) {
-            if ($pendingMobile !== null) {
-                $user['mobile'] = $pendingMobile;
+            if ($mobile !== null) {
+                $user['mobile'] = $mobile;
             }
             $user['member_type'] ??= $memberType;
 
@@ -212,25 +202,38 @@ class AuthService
         $storedUser = Arr::except($normalizedData, ['token', 'refresh_token', 'user', 'token_type', 'expires_in']) + [
             'member_type' => $memberType,
         ];
-        if ($pendingMobile !== null) {
-            $storedUser['mobile'] = $pendingMobile;
+        if ($mobile !== null) {
+            $storedUser['mobile'] = $mobile;
         }
 
         return $storedUser;
     }
 
-    private function rememberPendingMobile(string $ticket, ?string $mobile, int $expiresIn): void
+    /**
+     * 从登录成功响应中提取用户手机号，兼容常见上游字段名和用户对象。
+     *
+     * @param  array<string, mixed>  $data  上游登录成功数据
+     * @return string|null 登录成功响应中的手机号
+     */
+    private function extractMobile(array $data): ?string
     {
-        if ($mobile !== null && $mobile !== '') {
-            $this->authTokenService->storePendingMobile($ticket, $mobile, $expiresIn);
+        foreach (['mobile', 'phone', 'telephone'] as $field) {
+            $value = $data[$field] ?? null;
+            if (is_scalar($value) && trim((string) $value) !== '') {
+                return trim((string) $value);
+            }
         }
-    }
 
-    private function resolveLoginMobile(string $username): ?string
-    {
-        $username = trim($username);
+        foreach (['user', 'member', 'memberInfo', 'userInfo'] as $field) {
+            if (is_array($data[$field] ?? null)) {
+                $mobile = $this->extractMobile($data[$field]);
+                if ($mobile !== null) {
+                    return $mobile;
+                }
+            }
+        }
 
-        return preg_match('/^1[3-9]\d{9}$/', $username) === 1 ? $username : null;
+        return null;
     }
 
     private function resolveApiCode(?string $code): ApiCode

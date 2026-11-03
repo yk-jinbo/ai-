@@ -59,7 +59,7 @@ class AuthRequest extends FormRequest
             'ticket.string' => '登录票据格式不正确',
             'member_type.required' => '登录身份不能为空',
             'member_type.in' => '登录身份不受支持',
-            'agreement_accepted.accepted' => '请先同意用户协议',
+            'agreement_accepted.boolean' => '协议确认格式不正确',
         ];
     }
 
@@ -115,7 +115,7 @@ class AuthRequest extends FormRequest
         return [
             'ticket' => ['required', 'string', 'max:512'],
             'member_type' => ['required', 'string', 'in:NORMAL,VIRTUAL,BRACELET'],
-            'agreement_accepted' => ['accepted'],
+            'agreement_accepted' => ['sometimes', 'boolean'],
         ];
     }
 

@@ -127,9 +127,9 @@ class LoginConfirmationTest extends TestCase
     }
 
     /**
-     * 短信登录的手机号在身份确认后进入本地用户缓存，业务接口可通过 currentUser() 读取。
+     * 身份确认响应中的手机号进入本地用户缓存，业务接口可通过 currentUser() 读取。
      */
-    public function test_sms_login_mobile_is_available_from_current_user(): void
+    public function test_confirm_response_mobile_is_available_from_current_user(): void
     {
         $token = str_repeat('t', 64);
         Http::fake([
@@ -141,7 +141,7 @@ class LoginConfirmationTest extends TestCase
             'https://identity.example.test/api-iam/api/v1/member/login/confirm' => Http::response([
                 'code' => 'OK',
                 'msg' => 'ok',
-                'data' => ['accessToken' => $token, 'expiresIn' => 1800, 'user' => ['id' => 8]],
+                'data' => ['accessToken' => $token, 'expiresIn' => 1800, 'user' => ['id' => 8, 'mobile' => '13900001111']],
             ]),
         ]);
 
@@ -156,12 +156,37 @@ class LoginConfirmationTest extends TestCase
             'agreement_accepted' => true,
         ])->assertStatus(200)->assertJson([
             'code' => 0,
-            'data' => ['user' => ['id' => 8, 'mobile' => '13812345678']],
+            'data' => ['user' => ['id' => 8, 'mobile' => '13900001111']],
         ]);
 
         $this->withToken($token)->getJson('/api/test/member')->assertStatus(200)->assertJson([
             'code' => 0,
-            'data' => ['id' => 8, 'mobile' => '13812345678'],
+            'data' => ['id' => 8, 'mobile' => '13900001111'],
         ]);
+    }
+
+    /**
+     * 未接受协议时本项目不阻止身份确认，并将 false 原样转发给上游。
+     */
+    public function test_confirm_login_allows_unaccepted_agreement_value(): void
+    {
+        Http::fake([
+            'https://identity.example.test/api-iam/api/v1/member/login/confirm' => Http::response([
+                'code' => 'OK',
+                'msg' => 'ok',
+                'data' => ['accessToken' => 'agreement-test-token', 'expiresIn' => 1800],
+            ]),
+        ]);
+
+        $this->postJson('/api/auth/login/confirm', [
+            'ticket' => 'test-login-ticket',
+            'member_type' => 'NORMAL',
+            'agreement_accepted' => false,
+        ])->assertStatus(200)->assertJson(['code' => 0]);
+
+        Http::assertSent(fn ($request): bool =>
+            str_ends_with($request->url(), 'member/login/confirm')
+            && $request['agreementAccepted'] === false
+        );
     }
 }
