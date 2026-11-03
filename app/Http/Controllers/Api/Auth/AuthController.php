@@ -69,6 +69,40 @@ class AuthController extends Controller
         return ResponseHelper::success($result->data, $result->message);
     }
 
+    /**
+     * 匿名获取所选身份的协议清单，禁止缓存以便客户端读取当前发布版本。
+     *
+     * @param  AuthRequest  $request  协议场景和身份参数
+     * @return JsonResponse 统一格式的协议清单
+     *
+     * @throws \Exception 协议查询失败时由全局异常处理返回
+     */
+    #[Get('agreements/policy', name: 'api.auth.agreements.policy')]
+    public function agreementPolicy(AuthRequest $request): JsonResponse
+    {
+        $data = $request->validated();
+        $result = $this->authService->agreementPolicy($data['member_type'], $data['scene'] ?? 'LOGIN');
+
+        return ResponseHelper::success($result->data, $result->message)->header('Cache-Control', 'no-store');
+    }
+
+    /**
+     * 匿名读取清单中指定的协议版本正文，不记录或代替用户同意。
+     *
+     * @param  AuthRequest  $request  查询参数中的协议版本 ID，按字符串校验
+     * @return JsonResponse 统一格式的协议正文
+     *
+     * @throws \Exception 正文查询失败时由全局异常处理返回
+     */
+    #[Get('agreements/versions', name: 'api.auth.agreements.version')]
+    public function agreementVersion(AuthRequest $request): JsonResponse
+    {
+        $data = $request->validated();
+        $result = $this->authService->agreementVersion($data['version_id']);
+
+        return ResponseHelper::success($result->data, $result->message)->header('Cache-Control', 'no-store');
+    }
+
     #[Post('login/confirm', name: 'api.auth.login.confirm')]
     public function confirmLogin(AuthRequest $request): JsonResponse
     {
@@ -76,7 +110,7 @@ class AuthController extends Controller
         $result = $this->authService->confirmLogin(
             $data['ticket'],
             $data['member_type'],
-            (bool) $data['agreement_accepted'],
+            $data['agreement_consent'] ?? null,
         );
 
         return ResponseHelper::success($result->data, $result->message);

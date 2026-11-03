@@ -5,6 +5,7 @@ namespace App\Services;
 use App\Enums\ApiCode;
 use App\Helpers\ResponseHelper;
 use Illuminate\Support\Arr;
+use Illuminate\Support\Str;
 
 /**
  * 会员认证业务服务。
@@ -52,11 +53,6 @@ class AuthService
         $result = $this->externalAuthClient->preparePasswordLogin($username, $password);
         $this->ensureSuccess($result, '账号或密码错误');
         $data = $this->normalizePrepareData($result->data);
-        $this->rememberPendingMobile(
-            $data['ticket'],
-            $this->resolveLoginMobile($username),
-            $data['expires_in'],
-        );
 
         return new AuthLoginResult(
             $data,
@@ -70,7 +66,6 @@ class AuthService
         $result = $this->externalAuthClient->prepareSmsLogin($mobile, $code);
         $this->ensureSuccess($result, '验证码错误或已过期');
         $data = $this->normalizePrepareData($result->data);
-        $this->rememberPendingMobile($data['ticket'], $mobile, $data['expires_in']);
 
         return new AuthLoginResult(
             $data,
@@ -78,17 +73,58 @@ class AuthService
         );
     }
 
-    /** 选择身份并确认协议，保存上游令牌后返回旧项目登录字段。 */
-    public function confirmLogin(string $ticket, string $memberType, bool $agreementAccepted): AuthLoginResult
+    /**
+     * 查询协议清单并转换为本项目字段，协议版本和摘要保持上游原值。
+     *
+     * @param  string  $memberType  用户选择的身份
+     * @param  string  $scene  协议场景，登录使用 LOGIN
+     * @return AuthLoginResult 本项目格式的协议清单及提示
+     *
+     * @throws \Exception 上游协议清单查询失败时抛出
+     */
+    public function agreementPolicy(string $memberType, string $scene): AuthLoginResult
     {
-        $pendingMobile = $this->authTokenService->pendingMobile($ticket);
-        $result = $this->externalAuthClient->confirmLogin($ticket, $memberType, $agreementAccepted);
+        $result = $this->externalAuthClient->agreementPolicy($memberType, $scene);
+        $this->ensureSuccess($result, '协议清单获取失败');
+
+        return new AuthLoginResult($this->normalizeAgreementData($result->data), $result->message ?: '协议清单获取成功');
+    }
+
+    /**
+     * 读取协议正文，转换元数据字段名并保留正文的块、片段和样式。
+     *
+     * @param  string  $versionId  清单中的协议版本 ID
+     * @return AuthLoginResult 本项目格式的协议正文及提示
+     *
+     * @throws \Exception 上游协议正文查询失败时抛出
+     */
+    public function agreementVersion(string $versionId): AuthLoginResult
+    {
+        $result = $this->externalAuthClient->agreementVersion($versionId);
+        $this->ensureSuccess($result, '协议正文获取失败');
+
+        return new AuthLoginResult($this->normalizeAgreementData($result->data), $result->message ?: '协议正文获取成功');
+    }
+
+    /**
+     * 提交所选身份及客户端确认的协议版本，成功后保存用户信息和上游令牌。
+     *
+     * @param  string  $ticket  登录校验票据
+     * @param  string  $memberType  所选身份
+     * @param  array<string, mixed>|null  $agreementConsent  同意状态、协议摘要和完整版本集合
+     * @return AuthLoginResult 旧项目格式的登录结果
+     *
+     * @throws \Exception 上游确认失败或未返回访问令牌时抛出
+     */
+    public function confirmLogin(string $ticket, string $memberType, ?array $agreementConsent = null): AuthLoginResult
+    {
+        $result = $this->externalAuthClient->confirmLogin($ticket, $memberType, $agreementConsent);
         $this->ensureSuccess($result, '登录确认失败');
 
         $data = $this->normalizeTokenData($result->data, $memberType);
         $token = (string) ($data['token'] ?? '');
         ResponseHelper::errorIf($token === '', '登录响应缺少访问令牌', ApiCode::ERROR);
-        $user = $this->storedUser($result->data, $data, $memberType, $pendingMobile);
+        $user = $this->storedUser($result->data, $data, $memberType);
         $data['user'] = $user;
 
         $this->authTokenService->store(
@@ -96,7 +132,6 @@ class AuthService
             $user,
             $data['expires_in'],
         );
-        $this->authTokenService->forgetPendingMobile($ticket);
 
         return new AuthLoginResult(
             $data,
@@ -107,8 +142,7 @@ class AuthService
     /**
      * 清除本地 Redis 中保存的登录令牌。
      *
-     * @param  string  $token  上游访问令牌
-     * @return void
+     * @return void 从当前请求读取令牌并清除对应用户缓存
      */
     public function logout(): void
     {
@@ -146,6 +180,27 @@ class AuthService
             ),
             'member_types' => $memberTypes,
         ];
+    }
+
+    /** @param array<string, mixed> $data @return array<string, mixed> */
+    private function normalizeAgreementData(array $data): array
+    {
+        $normalized = [];
+        foreach ($data as $key => $value) {
+            $normalized[Str::snake($key)] = $value;
+        }
+        // 版本 ID 可能超出 JavaScript 安全整数范围，整个中转流程按字符串传递。
+        if (isset($normalized['version_id'])) {
+            $normalized['version_id'] = (string) $normalized['version_id'];
+        }
+        if (isset($normalized['documents']) && is_array($normalized['documents'])) {
+            $normalized['documents'] = [];
+            foreach ($data['documents'] as $document) {
+                $normalized['documents'][] = $this->normalizeAgreementData($document);
+            }
+        }
+
+        return $normalized;
     }
 
     /**
@@ -188,21 +243,19 @@ class AuthService
      * @param  array<string, mixed>  $normalizedData
      * @return array<string, mixed>
      */
-    private function storedUser(
-        array $externalData,
-        array $normalizedData,
-        string $memberType,
-        ?string $pendingMobile = null,
-    ): array
+    private function storedUser(array $externalData, array $normalizedData, string $memberType): array
     {
         $user = $externalData['user']
             ?? $externalData['member']
             ?? $externalData['memberInfo']
             ?? $externalData['userInfo']
             ?? null;
+        $mobile = is_array($user)
+            ? $this->extractMobile($user) ?? $this->extractMobile($externalData)
+            : $this->extractMobile($externalData);
         if (is_array($user)) {
-            if ($pendingMobile !== null) {
-                $user['mobile'] = $pendingMobile;
+            if ($mobile !== null) {
+                $user['mobile'] = $mobile;
             }
             $user['member_type'] ??= $memberType;
 
@@ -212,25 +265,38 @@ class AuthService
         $storedUser = Arr::except($normalizedData, ['token', 'refresh_token', 'user', 'token_type', 'expires_in']) + [
             'member_type' => $memberType,
         ];
-        if ($pendingMobile !== null) {
-            $storedUser['mobile'] = $pendingMobile;
+        if ($mobile !== null) {
+            $storedUser['mobile'] = $mobile;
         }
 
         return $storedUser;
     }
 
-    private function rememberPendingMobile(string $ticket, ?string $mobile, int $expiresIn): void
+    /**
+     * 从登录成功响应中提取用户手机号，兼容常见上游字段名和用户对象。
+     *
+     * @param  array<string, mixed>  $data  上游登录成功数据
+     * @return string|null 登录成功响应中的手机号
+     */
+    private function extractMobile(array $data): ?string
     {
-        if ($mobile !== null && $mobile !== '') {
-            $this->authTokenService->storePendingMobile($ticket, $mobile, $expiresIn);
+        foreach (['mobile', 'phone', 'telephone'] as $field) {
+            $value = $data[$field] ?? null;
+            if (is_scalar($value) && trim((string) $value) !== '') {
+                return trim((string) $value);
+            }
         }
-    }
 
-    private function resolveLoginMobile(string $username): ?string
-    {
-        $username = trim($username);
+        foreach (['user', 'member', 'memberInfo', 'userInfo'] as $field) {
+            if (is_array($data[$field] ?? null)) {
+                $mobile = $this->extractMobile($data[$field]);
+                if ($mobile !== null) {
+                    return $mobile;
+                }
+            }
+        }
 
-        return preg_match('/^1[3-9]\d{9}$/', $username) === 1 ? $username : null;
+        return null;
     }
 
     private function resolveApiCode(?string $code): ApiCode
@@ -243,7 +309,8 @@ class AuthService
             'SMS_VERIFY_LOCKED',
             'SMS_IP_LOCKED' => ApiCode::UNAUTHORIZED,
             'NOT_FOUND' => ApiCode::NOT_FOUND,
-            'BIZ_CONFLICT', 'SMS_TOO_FREQUENT', 'SMS_DAILY_LIMIT', 'TENANT_UNASSIGNED' => ApiCode::CONFLICT,
+            'BIZ_CONFLICT', 'SMS_TOO_FREQUENT', 'SMS_DAILY_LIMIT', 'TENANT_UNASSIGNED',
+            'AGREEMENT_NOT_ACCEPTED', 'AGREEMENT_VERSION_CHANGED', 'AGREEMENT_SET_MISMATCH' => ApiCode::CONFLICT,
             default => ApiCode::ERROR,
         };
     }

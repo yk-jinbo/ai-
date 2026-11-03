@@ -4,9 +4,9 @@ namespace Tests\Feature\ExternalHttp;
 
 use App\Enums\ExternalGateway;
 use App\Services\AuthTokenService;
+use App\Services\BarterService;
 use App\Services\ExternalAuthClient;
 use App\Services\ExternalHttpClient;
-use App\Services\BarterService;
 use App\Services\RelationService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Http\Client\ConnectionException;
@@ -378,14 +378,18 @@ class ExternalHttpClientTest extends TestCase
         $this->assertTrue($auth->sendSms('13812345678')->success);
         $this->assertTrue($auth->preparePasswordLogin('member', 'password')->success);
         $this->assertTrue($auth->prepareSmsLogin('13812345678', '123456')->success);
-        $result = $auth->confirmLogin('login-ticket', 'NORMAL', true);
+        $result = $auth->confirmLogin('login-ticket', 'NORMAL', [
+            'accepted' => true,
+            'policy_hash' => 'confirmed-policy',
+            'documents' => [['document_code' => 'NORMAL_USER_AGREEMENT', 'version_id' => '101']],
+        ]);
 
         $this->assertTrue($result->success);
         $this->assertSame('OK', $result->code);
         $this->assertSame('auth-trace', $result->traceId);
         $this->assertSame(['ticket' => 'login-ticket'], $result->data);
         Http::assertSent(fn (ClientRequest $request): bool => str_ends_with($request->url(), 'sms/send') && $request['scene'] === 'LOGIN');
-        Http::assertSent(fn (ClientRequest $request): bool => str_ends_with($request->url(), 'member/login/confirm') && $request['memberType'] === 'NORMAL' && $request['agreementAccepted'] === true);
+        Http::assertSent(fn (ClientRequest $request): bool => str_ends_with($request->url(), 'member/login/confirm') && $request['memberType'] === 'NORMAL' && $request['agreementConsent']['accepted'] === true && ! isset($request['agreementAccepted']));
         $this->assertSame([], $this->handler->getRecords());
     }
 
@@ -428,7 +432,9 @@ class ExternalHttpClientTest extends TestCase
         $this->assertTrue($auth->sendSms('13812345678')->success);
         $this->assertTrue($auth->preparePasswordLogin('member', 'password')->success);
         $this->assertTrue($auth->prepareSmsLogin('13812345678', '123456')->success);
-        $this->assertTrue($auth->confirmLogin('login-ticket', 'NORMAL', true)->success);
+        $this->assertTrue($auth->confirmLogin('login-ticket', 'NORMAL', ['accepted' => true])->success);
+        $this->assertTrue($auth->agreementPolicy('NORMAL', 'LOGIN')->success);
+        $this->assertTrue($auth->agreementVersion('101')->success);
         $this->client->get('/api/orders', service: 'orders');
         $this->client->get('/api/certificate-example', service: 'digital_certificate', gateway: ExternalGateway::IDENTITY);
 
@@ -437,7 +443,9 @@ class ExternalHttpClientTest extends TestCase
         foreach (['sms/send', 'member/login/prepare', 'member/login/sms/prepare', 'member/login/confirm'] as $endpoint) {
             Http::assertSent(fn (ClientRequest $request): bool => $request->url() === 'http://101.200.147.55:18080/api-iam/api/v1/'.$endpoint);
         }
-        Http::assertSentCount(6);
+        Http::assertSent(fn (ClientRequest $request): bool => $request->method() === 'GET' && $request->url() === 'http://101.200.147.55:18080/api-iam/api/v1/member/agreements/policy?scene=LOGIN&memberType=NORMAL');
+        Http::assertSent(fn (ClientRequest $request): bool => $request->method() === 'GET' && $request->url() === 'http://101.200.147.55:18080/api-iam/api/v1/member/agreements/versions/101');
+        Http::assertSentCount(8);
         $this->assertSame([], $this->handler->getRecords());
     }
 

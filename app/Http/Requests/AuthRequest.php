@@ -24,6 +24,8 @@ class AuthRequest extends FormRequest
             'sendSms' => $this->rulesForSendSms(),
             'passwordLogin' => $this->rulesForPasswordLogin(),
             'smsLogin' => $this->rulesForSmsLogin(),
+            'agreementPolicy' => $this->rulesForAgreementPolicy(),
+            'agreementVersion' => $this->rulesForAgreementVersion(),
             'confirmLogin' => $this->rulesForConfirmLogin(),
             'logout' => $this->rulesForNoParams(),
             default => throw new LogicException('AuthRequest 未配置当前 Controller 动作的校验规则'),
@@ -31,6 +33,12 @@ class AuthRequest extends FormRequest
     }
 
     public function messages(): array
+    {
+        return [...$this->loginMessages(), ...$this->agreementMessages()];
+    }
+
+    /** @return array<string, string> 原有登录参数的中文提示 */
+    private function loginMessages(): array
     {
         return [
             'mobile.required' => '手机号不能为空',
@@ -58,8 +66,41 @@ class AuthRequest extends FormRequest
             'ticket.required' => '登录票据不能为空',
             'ticket.string' => '登录票据格式不正确',
             'member_type.required' => '登录身份不能为空',
+            'member_type.string' => '登录身份必须为字符串',
             'member_type.in' => '登录身份不受支持',
-            'agreement_accepted.accepted' => '请先同意用户协议',
+        ];
+    }
+
+    /** @return array<string, string> 协议读取及同意信息的中文提示 */
+    private function agreementMessages(): array
+    {
+        return [
+            'scene.in' => '协议场景不受支持',
+            'scene.string' => '协议场景必须为字符串',
+            'version_id.required' => '协议版本ID不能为空',
+            'version_id.string' => '协议版本ID必须为字符串',
+            'version_id.regex' => '协议版本ID必须为正整数字符串',
+            'agreement_consent.array' => '协议确认必须为包含同意状态和版本信息的对象',
+            'agreement_consent.min' => '协议确认信息不能为空',
+            'agreement_consent.accepted.required_with' => '请提供协议同意状态',
+            'agreement_consent.accepted.boolean' => '协议同意状态必须为布尔值',
+            'agreement_consent.policy_hash.required_if' => '请提供协议清单摘要',
+            'agreement_consent.policy_hash.string' => '协议清单摘要必须为字符串',
+            'agreement_consent.policy_hash.max' => '协议清单摘要长度不能超过256位',
+            'agreement_consent.policy_hash.regex' => '协议清单摘要不能为空白字符',
+            'agreement_consent.documents.required_if' => '请提供完整的协议版本集合',
+            'agreement_consent.documents.array' => '协议版本集合必须为数组',
+            'agreement_consent.documents.list' => '协议版本集合必须为列表',
+            'agreement_consent.documents.min' => '协议版本集合不能为空',
+            'agreement_consent.documents.*.array' => '每项协议版本必须包含协议编码和版本ID',
+            'agreement_consent.documents.*.document_code.required' => '协议编码不能为空',
+            'agreement_consent.documents.*.document_code.string' => '协议编码必须为字符串',
+            'agreement_consent.documents.*.document_code.max' => '协议编码长度不能超过128位',
+            'agreement_consent.documents.*.document_code.regex' => '协议编码不能为空白字符',
+            'agreement_consent.documents.*.document_code.distinct' => '协议编码不能重复',
+            'agreement_consent.documents.*.version_id.required' => '协议版本ID不能为空',
+            'agreement_consent.documents.*.version_id.string' => '协议版本ID必须按字符串传递',
+            'agreement_consent.documents.*.version_id.regex' => '协议版本ID必须为正整数字符串',
         ];
     }
 
@@ -75,7 +116,14 @@ class AuthRequest extends FormRequest
             'offset_x' => '滑块横向位移',
             'ticket' => '登录票据',
             'member_type' => '登录身份',
-            'agreement_accepted' => '协议确认',
+            'scene' => '协议场景',
+            'version_id' => '协议版本ID',
+            'agreement_consent' => '协议确认信息',
+            'agreement_consent.accepted' => '协议同意状态',
+            'agreement_consent.policy_hash' => '协议清单摘要',
+            'agreement_consent.documents' => '协议版本集合',
+            'agreement_consent.documents.*.document_code' => '协议编码',
+            'agreement_consent.documents.*.version_id' => '协议版本ID',
         ];
     }
 
@@ -115,8 +163,28 @@ class AuthRequest extends FormRequest
         return [
             'ticket' => ['required', 'string', 'max:512'],
             'member_type' => ['required', 'string', 'in:NORMAL,VIRTUAL,BRACELET'],
-            'agreement_accepted' => ['accepted'],
+            // 是否强制同意由上游配置决定；本项目校验结构，不把 false 改为 true。
+            'agreement_consent' => ['sometimes', 'array:accepted,policy_hash,documents', 'min:1'],
+            'agreement_consent.accepted' => ['required_with:agreement_consent', 'boolean'],
+            'agreement_consent.policy_hash' => ['required_if:agreement_consent.accepted,true', 'string', 'max:256', 'regex:/\S/'],
+            'agreement_consent.documents' => ['required_if:agreement_consent.accepted,true', 'array', 'list', 'min:1'],
+            'agreement_consent.documents.*' => ['array:document_code,version_id'],
+            'agreement_consent.documents.*.document_code' => ['required', 'string', 'max:128', 'regex:/\S/', 'distinct'],
+            'agreement_consent.documents.*.version_id' => ['required', 'string', 'regex:/^[1-9][0-9]*$/'],
         ];
+    }
+
+    private function rulesForAgreementPolicy(): array
+    {
+        return [
+            'scene' => ['sometimes', 'string', 'in:LOGIN,REGISTER'],
+            'member_type' => ['required', 'string', 'in:NORMAL,VIRTUAL,BRACELET'],
+        ];
+    }
+
+    private function rulesForAgreementVersion(): array
+    {
+        return ['version_id' => ['required', 'string', 'regex:/^[1-9][0-9]*$/']];
     }
 
     private function rulesForNoParams(): array
