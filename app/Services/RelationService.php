@@ -303,7 +303,7 @@ class RelationService
      */
     public function getExchangeStatisticsList(string $startDate, string $endDate): array
     {
-        $todayDay = date('Y-m-d');
+//        $todayDay = date('Y-m-d');
 //        $todayDay = $endDate = '2026-10-27';
 
         $response = $this->http->post(
@@ -312,17 +312,18 @@ class RelationService
                 'tenantId' => 'demo',
                 'mobile' => '13800000002',
                 'memberType' => 'NORMAL',
-                'asOfDate' => $todayDay,
+                'asOfDate' => $endDate,
                 'fromDate' => $startDate,
                 'toDate' => $endDate,
                 'pageNo' => 1,
-                'pageSize' => 20,
+                'pageSize' => 30,
             ],
             isSuccessful: static fn (Response $response): bool => $response->successful(),
             service: 'relations_network_flows',
         );
 
         $data = $response->json('data');
+//        return $data;
         if (! is_array($data)) {
             throw new RuntimeException('关系流水接口未返回有效数据');
         }
