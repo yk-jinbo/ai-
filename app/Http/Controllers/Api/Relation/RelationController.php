@@ -5,8 +5,10 @@ namespace App\Http\Controllers\Api\Relation;
 use App\Helpers\ResponseHelper;
 use App\Http\Controllers\Controller;
 use App\Http\Requests\RelationRequest;
+use App\Services\AuthTokenService;
 use App\Services\RelationService;
 use Illuminate\Http\JsonResponse;
+use Illuminate\Http\Request;
 use Spatie\RouteAttributes\Attributes\Get;
 use Spatie\RouteAttributes\Attributes\Prefix;
 
@@ -28,10 +30,12 @@ class RelationController extends Controller
      * 获取会员当日粉丝统计 Demo 数据。
      */
     #[Get('fans-statistics', name: 'api.relation.fans-statistics')]
-    public function fansStatistics(): JsonResponse
+    public function fansStatistics(Request $request, AuthTokenService $authTokenService): JsonResponse
     {
+        [$user, $token] = $this->authContext($request, $authTokenService);
+
         return ResponseHelper::success(
-            $this->relationService->getFansStatistics(),
+            $this->relationService->getFansStatistics($user, $token),
             '会员当日统计获取成功',
         );
     }
@@ -40,12 +44,13 @@ class RelationController extends Controller
      * 获取粉丝团列表 Demo 数据。
      */
     #[Get('fans-list', name: 'api.relation.fans-list')]
-    public function fansList(RelationRequest $request): JsonResponse
+    public function fansList(RelationRequest $request, AuthTokenService $authTokenService): JsonResponse
     {
         $data = $request->validated();
+        [$user, $token] = $this->authContext($request, $authTokenService);
 
         return ResponseHelper::success(
-            $this->relationService->getFansList((int) ($data['page'] ?? 1), (int) ($data['pagesize'] ?? 10)),
+            $this->relationService->getFansList((int) ($data['page'] ?? 1), (int) ($data['pagesize'] ?? 10), $user, $token),
             '粉丝团列表获取成功',
         );
     }
@@ -54,12 +59,13 @@ class RelationController extends Controller
      * 获取团队会员列表 Demo 数据。
      */
     #[Get('team-list', name: 'api.relation.team-list')]
-    public function teamList(RelationRequest $request): JsonResponse
+    public function teamList(RelationRequest $request, AuthTokenService $authTokenService): JsonResponse
     {
         $data = $request->validated();
+        [$user, $token] = $this->authContext($request, $authTokenService);
 
         return ResponseHelper::success(
-            $this->relationService->getTeamList((int) ($data['page'] ?? 1), (int) ($data['pagesize'] ?? 10)),
+            $this->relationService->getTeamList((int) ($data['page'] ?? 1), (int) ($data['pagesize'] ?? 10), $user, $token),
             '团队会员列表获取成功',
         );
     }
@@ -68,10 +74,12 @@ class RelationController extends Controller
      * 获取团队当日统计 Demo 数据。
      */
     #[Get('team-statistics', name: 'api.relation.team-statistics')]
-    public function teamStatistics(): JsonResponse
+    public function teamStatistics(Request $request, AuthTokenService $authTokenService): JsonResponse
     {
+        [$user, $token] = $this->authContext($request, $authTokenService);
+
         return ResponseHelper::success(
-            $this->relationService->getTeamStatistics(),
+            $this->relationService->getTeamStatistics($user, $token),
             '团队当日统计获取成功',
         );
     }
@@ -80,10 +88,12 @@ class RelationController extends Controller
      * 获取团队兑换额汇总 Demo 数据。
      */
     #[Get('exchange-statistics', name: 'api.relation.exchange-statistics')]
-    public function exchangeStatistics(): JsonResponse
+    public function exchangeStatistics(Request $request, AuthTokenService $authTokenService): JsonResponse
     {
+        [$user, $token] = $this->authContext($request, $authTokenService);
+
         return ResponseHelper::success(
-            $this->relationService->getExchangeStatistics(),
+            $this->relationService->getExchangeStatistics($user, $token),
             '团队兑换额统计获取成功',
         );
     }
@@ -92,13 +102,20 @@ class RelationController extends Controller
      * 获取团队兑换额记录 Demo 数据。
      */
     #[Get('exchange-statistics-list', name: 'api.relation.exchange-statistics-list')]
-    public function exchangeStatisticsList(RelationRequest $request): JsonResponse
+    public function exchangeStatisticsList(RelationRequest $request, AuthTokenService $authTokenService): JsonResponse
     {
         $data = $request->validated();
+        [$user, $token] = $this->authContext($request, $authTokenService);
 
         return ResponseHelper::success(
-            $this->relationService->getExchangeStatisticsList($data['start_date'], $data['end_date']),
+            $this->relationService->getExchangeStatisticsList($data['start_date'], $data['end_date'], $user, $token),
             '团队兑换额记录获取成功',
         );
+    }
+
+    /** @return array{array<string, mixed>, string} */
+    private function authContext(Request $request, AuthTokenService $authTokenService): array
+    {
+        return [$authTokenService->currentUser(), (string) $request->bearerToken()];
     }
 }

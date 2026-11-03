@@ -3,6 +3,7 @@
 namespace Tests\Feature\ExternalHttp;
 
 use App\Enums\ExternalGateway;
+use App\Services\AuthTokenService;
 use App\Services\BarterService;
 use App\Services\ExternalAuthClient;
 use App\Services\ExternalHttpClient;
@@ -85,16 +86,20 @@ class ExternalHttpClientTest extends TestCase
         config()->set('services.external_http.gateways.default', 'http://192.168.11.202:8082');
         Http::fake(['*' => Http::response(['code' => 'OK', 'data' => ['memberCount' => 12]])]);
 
-        $statistics = $this->app->make(RelationService::class)->getTeamStatistics();
+        $statistics = $this->app->make(RelationService::class)->getTeamStatistics(
+            ['mobile' => '13812345678', 'member_type' => 'NORMAL'],
+            'test-token',
+        );
 
         $this->assertSame(['memberCount' => 12], $statistics);
         Http::assertSent(function (ClientRequest $request): bool {
             return $request->method() === 'POST'
                 && $request->url() === 'http://192.168.11.202:8082/api/v1/computing/query/relations/summary'
                 && $request['tenantId'] === 'demo'
-                && $request['mobile'] === '13800000002'
+                && $request['mobile'] === '13812345678'
                 && $request['memberType'] === 'NORMAL'
-                && $request['asOfDate'] === '2026-10-27'
+                && $request['token'] === 'test-token'
+                && $request['asOfDate'] === date('Y-m-d', strtotime('-1 day'))
                 && $request['relationType'] === 'DIRECT';
         });
     }
@@ -103,19 +108,71 @@ class ExternalHttpClientTest extends TestCase
     public function test_barter_statistics_uses_home_indicators(): void
     {
         config()->set('services.external_http.gateways.default', 'http://192.168.11.202:8082');
-        $upstreamData = ['todayGeneralCoupon' => '121.11', 'yesterdayBarterAmount' => '999999.999'];
+        $upstreamData = ['tongbaoPrice' => '121.11', 'yesterdayTradeAmount' => '999999.999'];
         Http::fake(['*' => Http::response(['code' => 'OK', 'data' => $upstreamData])]);
 
-        $result = $this->app->make(BarterService::class)->getBarterStatistics();
+        $result = $this->app->make(BarterService::class)->getBarterStatistics([
+            'tenantId' => 'tenant-7',
+            'mobile' => '13812345678',
+            'member_type' => 'NORMAL',
+        ], 'test-inbound-token');
 
-        $this->assertSame($upstreamData, $result);
+        $this->assertSame([
+            'today_general_coupon' => '121.11',
+            'yesterday_barter_amount' => '999999.999',
+        ], $result);
         Http::assertSent(function (ClientRequest $request): bool {
             return $request->method() === 'POST'
                 && $request->url() === 'http://192.168.11.202:8082/api/v1/computing/query/home/indicators'
                 && $request['tenantId'] === 'demo'
-                && $request['mobile'] === '13800000002'
-                && $request['memberType'] === 'NORMAL';
+                && $request['mobile'] === '13812345678'
+                && $request['memberType'] === 'NORMAL'
+                && $request['token'] === 'test-inbound-token';
         });
+    }
+
+    /** 验证 barter 控制器从当前 Bearer token 用户获取上游身份参数。 */
+    public function test_barter_statistics_uses_current_authenticated_user(): void
+    {
+        config()->set('services.external_http.gateways.default', 'http://192.168.11.202:8082');
+        $this->mock(AuthTokenService::class)
+            ->shouldReceive('currentUser')
+            ->once()
+            ->andReturn([
+                'tenantId' => 'tenant-9',
+                'mobile' => '13898765432',
+                'member_type' => 'PREMIUM',
+            ]);
+        Http::fake(['*' => Http::response(['code' => 'OK', 'data' => [
+            'tongbaoPrice' => '50.00',
+            'yesterdayTradeAmount' => '80.00',
+        ]])]);
+
+        $this->withToken('test-bearer-token')->getJson('/api/barter/barter-statistics')
+            ->assertOk()
+            ->assertJsonPath('data.today_general_coupon', '50.00');
+
+        Http::assertSent(fn (ClientRequest $request): bool => $request['tenantId'] === 'demo'
+            && $request['mobile'] === '13898765432'
+            && $request['memberType'] === 'PREMIUM'
+            && $request['token'] === 'test-bearer-token');
+    }
+
+    /** 验证首页指标接口兼容 result 包装和指标字段直接位于顶层的响应。 */
+    public function test_barter_statistics_accepts_alternate_upstream_response_shapes(): void
+    {
+        config()->set('services.external_http.gateways.default', 'http://192.168.11.202:8082');
+        Http::fakeSequence()
+            ->push(['code' => 'OK', 'result' => ['tongbaoPrice' => '10.00', 'yesterdayTradeAmount' => '20.00']])
+            ->push(['code' => 'OK', 'tongbaoPrice' => '30.00', 'yesterdayTradeAmount' => '40.00']);
+        $service = $this->app->make(BarterService::class);
+        $user = ['mobile' => '13812345678', 'member_type' => 'NORMAL'];
+
+        $result = $service->getBarterStatistics($user, 'test-token');
+        $this->assertSame('10.00', $result['today_general_coupon']);
+
+        $result = $service->getBarterStatistics($user, 'test-token');
+        $this->assertSame('30.00', $result['today_general_coupon']);
     }
 
     /** 验证团队列表将本地分页参数传给关系详情接口并返回上游 data。 */
@@ -125,16 +182,19 @@ class ExternalHttpClientTest extends TestCase
         $upstreamData = ['records' => [['mobile' => '13800000001']], 'total' => 1];
         Http::fake(['*' => Http::response(['code' => 'OK', 'data' => $upstreamData])]);
 
-        $result = $this->app->make(RelationService::class)->getTeamList(1, 10);
+        $result = $this->app->make(RelationService::class)->getTeamList(1, 10, [
+            'mobile' => '13812345678', 'member_type' => 'PREMIUM',
+        ], 'test-token');
 
         $this->assertSame($upstreamData, $result);
         Http::assertSent(function (ClientRequest $request): bool {
             return $request->method() === 'POST'
                 && $request->url() === 'http://192.168.11.202:8082/api/v1/computing/query/relations/details'
                 && $request['tenantId'] === 'demo'
-                && $request['mobile'] === '13800000002'
-                && $request['memberType'] === 'NORMAL'
-                && $request['asOfDate'] === '2026-10-27'
+                && $request['mobile'] === '13812345678'
+                && $request['memberType'] === 'PREMIUM'
+                && $request['token'] === 'test-token'
+                && $request['asOfDate'] === date('Y-m-d', strtotime('-1 day'))
                 && $request['relationType'] === 'NETWORK'
                 && $request['pageNo'] === 1
                 && $request['pageSize'] === 10;
@@ -152,7 +212,9 @@ class ExternalHttpClientTest extends TestCase
         ]];
         Http::fake(['*' => Http::response(['code' => 'OK', 'data' => $upstreamData])]);
 
-        $result = $this->app->make(RelationService::class)->getExchangeStatisticsList('2026-08-01', '2026-08-03');
+        $result = $this->app->make(RelationService::class)->getExchangeStatisticsList(
+            '2026-08-01', '2026-08-03', ['mobile' => '13812345678', 'member_type' => 'NORMAL'], 'test-token',
+        );
 
         $this->assertSame([
             [
@@ -178,14 +240,33 @@ class ExternalHttpClientTest extends TestCase
             return $request->method() === 'POST'
                 && $request->url() === 'http://192.168.11.202:8082/api/v1/computing/query/relations/network/flows'
                 && $request['tenantId'] === 'demo'
-                && $request['mobile'] === '13800000002'
+                && $request['mobile'] === '13812345678'
                 && $request['memberType'] === 'NORMAL'
+                && $request['token'] === 'test-token'
                 && $request['asOfDate'] === date('Y-m-d')
                 && $request['fromDate'] === '2026-08-01'
                 && $request['toDate'] === '2026-08-03'
                 && $request['pageNo'] === 1
                 && $request['pageSize'] === 20;
         });
+    }
+
+    /** 验证关系流水接口返回 0004 时标记无兑换权限。 */
+    public function test_relation_exchange_statistics_marks_permission_false_for_code_0004(): void
+    {
+        config()->set('services.external_http.gateways.default', 'http://192.168.11.202:8082');
+        Http::fake(['*' => Http::response(['code' => '0004', 'message' => '无兑换权限'])]);
+
+        $result = $this->app->make(RelationService::class)->getExchangeStatistics(
+            ['mobile' => '13812345678', 'member_type' => 'NORMAL'],
+            'test-token',
+        );
+
+        $this->assertSame([
+            'total_exchange_amount' => '0.00',
+            'today_exchange_amount' => '0.00',
+            'has_exchange_permission' => false,
+        ], $result);
     }
 
     /** 验证粉丝列表从 fan_name 生成 fan_name_abbr，避免读取错误字段导致接口异常。 */
@@ -200,10 +281,32 @@ class ExternalHttpClientTest extends TestCase
             ]],
         ]])]);
 
-        $result = $this->app->make(RelationService::class)->getFansList(1, 10);
+        $result = $this->app->make(RelationService::class)->getFansList(1, 10, [
+            'mobile' => '13812345678', 'member_type' => 'NORMAL',
+        ], 'test-token');
 
         $this->assertSame('张三', $result['data'][0]['fan_name']);
         $this->assertSame('张', $result['data'][0]['fan_name_abbr']);
+    }
+
+    /** 验证关系接口把登录 token 去掉 Bearer 前缀后作为 JSON 字段传给上游。 */
+    public function test_relation_controller_forwards_bearer_token_and_current_user(): void
+    {
+        config()->set('services.external_http.gateways.default', 'http://192.168.11.202:8082');
+        $this->mock(AuthTokenService::class)
+            ->shouldReceive('currentUser')
+            ->once()
+            ->andReturn(['mobile' => '13812345678', 'member_type' => 'NORMAL']);
+        Http::fake(['*' => Http::response(['code' => 'OK', 'data' => [
+            'items' => [['member' => ['mobile' => '13800000001', 'memberName' => '测试']]],
+        ]])]);
+
+        $this->withToken('relation-test-token')->getJson('/api/relation/team-list?page=1&pagesize=10')->assertOk();
+
+        Http::assertSent(fn (ClientRequest $request): bool => $request['tenantId'] === 'demo'
+            && $request['mobile'] === '13812345678'
+            && $request['memberType'] === 'NORMAL'
+            && $request['token'] === 'relation-test-token');
     }
 
     /** 验证 HTTP 错误只记录一次，保留上游状态、业务码和追踪标识。 */
