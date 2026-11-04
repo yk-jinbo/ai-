@@ -12,28 +12,6 @@ AdminRoleModel       <-> AdminRoleRepository
 AdminPermissionModel <-> AdminPermissionRepository
 ```
 
-## 双数据库 Repository
-
-Repository 不接收连接名参数，也不在方法内切换默认连接。连接由注入 Model 的 `$connection` 固定决定：
-
-```php
-class BridgeRecordRepository
-{
-    public function __construct(
-        private BridgeRecordModel $model,
-    ) {}
-
-    public function create(array $data): BridgeRecordModel
-    {
-        $query = $this->model->newQuery();
-
-        return $query->create($data);
-    }
-}
-```
-
-上例中的 `BridgeRecordModel` 声明了 `data_bridge` 连接，因此 Repository 的查询和写入都会落到 B 库。主库和 B 库的表不能由同一个 Repository 注入多个 Model；跨库流程由 Service 注入两个独立 Repository。
-
 ## 职责
 
 Repository 负责对应表的全部数据库访问：
@@ -126,8 +104,6 @@ class UserService
 ## 禁止事项
 
 - 一个 Repository 注入 `AdminUserModel` 和 `AdminRoleModel`；
-- 一个 Repository 同时注入主库 Model 和 `data_bridge` 库 Model；
-- 通过请求参数传入连接名，或使用 `DB::connection($request->input('connection'))`；
 - Repository 之间编排业务流程；
 - 返回裸数组替代 Model/Collection；
 - 在 Repository 中调用 `ResponseHelper`；

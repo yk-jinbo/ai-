@@ -64,26 +64,6 @@ return [
             ]) : [],
         ],
 
-        'data_bridge' => [
-            'driver' => env('DATA_BRIDGE_DB_CONNECTION', 'mysql'),
-            'url' => env('DATA_BRIDGE_DB_URL'),
-            'host' => env('DATA_BRIDGE_DB_HOST', '127.0.0.1'),
-            'port' => env('DATA_BRIDGE_DB_PORT', '3306'),
-            'database' => env('DATA_BRIDGE_DB_DATABASE', 'data_bridge'),
-            'username' => env('DATA_BRIDGE_DB_USERNAME', 'root'),
-            'password' => env('DATA_BRIDGE_DB_PASSWORD', ''),
-            'unix_socket' => env('DATA_BRIDGE_DB_SOCKET', ''),
-            'charset' => env('DATA_BRIDGE_DB_CHARSET', 'utf8mb4'),
-            'collation' => env('DATA_BRIDGE_DB_COLLATION', 'utf8mb4_unicode_ci'),
-            'prefix' => env('DATA_BRIDGE_DB_PREFIX', 'db_'),
-            'prefix_indexes' => true,
-            'strict' => true,
-            'engine' => null,
-            'options' => extension_loaded('pdo_mysql') ? array_filter([
-                (PHP_VERSION_ID >= 80500 ? Mysql::ATTR_SSL_CA : PDO::MYSQL_ATTR_SSL_CA) => env('DATA_BRIDGE_MYSQL_ATTR_SSL_CA'),
-            ]) : [],
-        ],
-
         'mariadb' => [
             'driver' => 'mariadb',
             'url' => env('DB_URL'),

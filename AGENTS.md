@@ -8,7 +8,7 @@
 
 - **定位**：用户资产中心 · PC 管理系统，**纯 API 服务**（无服务端页面、无前端构建产物）。
 - **框架**：Laravel 13（PHP ^8.3）。
-- **数据层**：外部 MySQL 主库 + `data_bridge` 第二库 + Redis（`.env` 指向 `host.docker.internal`）。
+- **数据层**：外部 MySQL 主库 + Redis（`.env` 指向 `host.docker.internal`）。
 - **部署**：Docker Compose（PHP-FPM + Nginx）；宿主机端口由 `.env` 的 `PC_MANAGEMENT_HTTP_PORT` 配置。
 - **认证**：Laravel Sanctum Personal Access Token，有效期 7 天；使用自定义 `km_admin_personal_access_tokens` 表；同一账号只允许一份有效凭证。
 - **路由**：属性路由（注解）`spatie/laravel-route-attributes`，只扫描 `app/Http/Controllers/Api/`。
@@ -23,7 +23,7 @@
 | ✅ 已实现 | 认证系统：`POST /api/auth/login`、`GET /api/auth/me`、`POST /api/auth/logout`；Laravel Sanctum + `km_admin_personal_access_tokens`；RBAC 权限中间件（`account.status`、`permission`）；`km_admin_users`、`km_admin_roles`、`km_admin_permissions`、`km_admin_user_roles`、`km_admin_role_permissions`、`km_admin_personal_access_tokens` 六张表；`KmAuthSeeder` | 完整认证和 RBAC 闭环，有测试 |
 | ✅ 已实现 | `CacheManager`、`CacheScope`；`config/cache.php` redis_connection/namespace/version/hash_key；`CacheScopeTest` | Redis Factory 注入、HMAC key，直接使用 Redis 命令，未绑定业务缓存类 |
 | ⚠️ Demo/示例 | `DemoProductController`、`DemoProductRequest`、`DemoProductService`、`DemoProductRepository`、`DemoProductModel` 模型；`docs/architecture/*` | Controller/Request 一一对应，Factory 和 Feature 测试已补齐；仍是学习材料，未验收，不得作为已交付能力描述 |
-| ✅ 外部数据库 | 两套数据库表结构由开发者在数据库侧人工建立和维护；开发与镜像两套 Compose 均只启动 app/nginx，不创建 db/redis | 应用通过 `DB_*` 和 `DATA_BRIDGE_DB_*` 连接外部依赖 |
+| ✅ 外部数据库 | 数据库表结构由开发者在数据库侧人工建立和维护；开发与镜像两套 Compose 均只启动 app/nginx，不创建 db/redis | 应用通过 `DB_*` 连接外部依赖 |
 
 ---
 
@@ -988,18 +988,6 @@ enum UserStatus: string
 - 外键/索引根据查询需要维护；关联字段命名 `{实体}_id`。
 - 状态类字段取值用 Enum 管理，默认值在数据库侧维护。
 
-### 9.1 双数据库规范
-
-- 主业务库连接名固定为 `mysql`；第二数据库连接名固定为 `data_bridge`。
-- 主库使用 `DB_*` 配置，第二库使用 `DATA_BRIDGE_DB_*` 配置；业务代码禁止直接读取环境变量。
-- 涉及双库的每个 Model 必须声明固定的 `$connection`：A 库为 `mysql`，B 库为 `data_bridge`；禁止根据请求参数动态切换连接。
-- 每张表仍只对应一个 Model 和一个 Repository；Repository 只能注入所属连接的对应 Model。
-- Service 通过多个 Repository 编排跨库流程；Service/Controller 禁止直接使用 `Model::`、`DB::table()` 或 Query Builder 查询业务表。
-- 不使用跨库 SQL JOIN；需要组合结果时，分别查询后由 Service 按业务键组装。
-- 事务必须显式指定连接：`DB::connection('mysql')->transaction(...)` 或 `DB::connection('data_bridge')->transaction(...)`。一个连接的提交/回滚不会自动影响另一个连接。
-- 跨库写入不使用 XA/两阶段提交；必须使用业务唯一键保证幂等，并设计失败重试或补偿。
-- B 库表的前缀由 `DATA_BRIDGE_DB_PREFIX` 配置；Model 的 `TABLE` 和 `$table` 只写逻辑表名。
-
 ---
 
 ## 10. 测试规范
@@ -1009,7 +997,7 @@ enum UserStatus: string
 - **必须使用** `RefreshDatabase`；构造测试数据用 Factory（`AdminUserModel::factory()->create([...])`）。
 - **断言**：`assertStatus()` + `assertJsonStructure()` + `assertJson()`，校验 code/message/data 契约。
 - **覆盖要求**：每个新接口必须覆盖 ①成功场景 ②校验失败（422）③关键错误状态（401/404/400）；合并前运行完整测试套件。
-- **隔离**：`phpunit.xml` 为 `mysql` 和 `data_bridge` 两个连接分别使用 SQLite 内存库，另使用 array cache/session、sync queue；测试**不得连接外部开发/生产数据库**。
+- **隔离**：`phpunit.xml` 为 `mysql` 连接使用 SQLite 内存库，另使用 array cache/session、sync queue；测试**不得连接外部开发/生产数据库**。
 - **运行**：`docker compose -f docker-compose.image.yml exec -T app php artisan test --no-coverage`；只跑单个文件 `php artisan test --filter=ApiCodeTest`。
 
 ---
@@ -1023,8 +1011,7 @@ enum UserStatus: string
 
 # 2. 模型（含 fillable/casts/作用域/关联/枚举引用）
 docker compose -f docker-compose.image.yml exec -T app php artisan make:model ProductModel
-#    生成后设置 public const TABLE = 'products'、protected $connection = 'mysql' 和 protected $table = self::TABLE
-#    B 库实体将 protected $connection 改为 'data_bridge'
+#    生成后设置 public const TABLE = 'products' 和 protected $table = self::TABLE
 
 # 3. 枚举（状态类字段）
 #    app/Enums/ProductStatus.php
@@ -1054,8 +1041,6 @@ docker compose -f docker-compose.image.yml exec -T app php artisan make:controll
 - [ ] Repository 只注入对应 Model，所有数据访问（含 CRUD）都走 Repository
 - [ ] 关联关系定义在 Model，并由对应 Repository 调用
 - [ ] Service/Controller 中无直接 `Model::` 查询或 Query Builder
-- [ ] 双库实体已在 Model 固定声明 `mysql` 或 `data_bridge` 连接，未从请求参数动态选择
-- [ ] 跨库流程通过多个 Repository 编排，事务显式指定连接，并具备幂等键/重试或补偿策略
 - [ ] 写操作走 Service + 事务，失败抛异常；数据不存在用 `errorIf`，不返回 404
 - [ ] 全部通过 `ResponseHelper` 返回 `code/message/data`
 - [ ] 路由命名 `api.{模块}.{action}`，`php artisan route:list --path=api` 可见

@@ -18,6 +18,7 @@ id_ed25519*
 **/.ssh/
 /secrets.json
 **/secrets.json
+.idea
 
 # Logs and generated runtime files.
 *.log
