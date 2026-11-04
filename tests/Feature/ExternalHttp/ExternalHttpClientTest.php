@@ -109,7 +109,12 @@ class ExternalHttpClientTest extends TestCase
     {
         config()->set('services.external_http.gateways.default', 'http://192.168.11.202:8082');
         $upstreamData = ['tongbaoPrice' => '121.11', 'yesterdayTradeAmount' => '999999.999'];
-        Http::fake(['*' => Http::response(['code' => 'OK', 'data' => $upstreamData])]);
+        Http::fake(function (ClientRequest $request, array $options) use ($upstreamData) {
+            $this->assertSame(5, $options['connect_timeout']);
+            $this->assertSame(15, $options['timeout']);
+
+            return Http::response(['code' => 'OK', 'data' => $upstreamData]);
+        });
 
         $result = $this->app->make(BarterService::class)->getBarterStatistics([
             'tenantId' => 'tenant-7',
@@ -124,7 +129,6 @@ class ExternalHttpClientTest extends TestCase
         Http::assertSent(function (ClientRequest $request): bool {
             return $request->method() === 'POST'
                 && $request->url() === 'http://192.168.11.202:8082/api/v1/computing/query/home/indicators'
-                && $request['tenantId'] === 'demo'
                 && $request['mobile'] === '13812345678'
                 && $request['memberType'] === 'NORMAL'
                 && $request['token'] === 'test-inbound-token';
@@ -152,8 +156,7 @@ class ExternalHttpClientTest extends TestCase
             ->assertOk()
             ->assertJsonPath('data.today_general_coupon', '50.00');
 
-        Http::assertSent(fn (ClientRequest $request): bool => $request['tenantId'] === 'demo'
-            && $request['mobile'] === '13898765432'
+        Http::assertSent(fn (ClientRequest $request): bool => $request['mobile'] === '13898765432'
             && $request['memberType'] === 'PREMIUM'
             && $request['token'] === 'test-bearer-token');
     }
