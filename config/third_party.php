@@ -49,6 +49,10 @@ return [
             : $memberAuthBaseUrl.'/api/v1/computing/query/members/identities',
     ],
 
+    'agent' => [
+        'earnings' => $memberAuthBaseUrl.'/api/v1/computing/query/agents/earnings',
+    ],
+
     'assets' => [
         'summary' => $assetSummaryUrl !== ''
             ? $assetSummaryUrl
