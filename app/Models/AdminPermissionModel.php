@@ -3,7 +3,6 @@
 namespace App\Models;
 
 use Illuminate\Database\Eloquent\Builder;
-use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\BelongsToMany;
@@ -12,7 +11,7 @@ use Illuminate\Database\Eloquent\SoftDeletes;
 class AdminPermissionModel extends Model
 {
     // 权限删除需要与角色、菜单和按钮一致地走软删除，避免历史授权关系被物理删除。
-    use HasFactory, SoftDeletes;
+    use SoftDeletes;
 
     protected $table = 'admin_permissions';
 

@@ -76,8 +76,6 @@ ResponseHelper → JSON 响应
 ```text
 km_admin_users       -> AdminUserModel.php       -> AdminUserRepository.php
 km_admin_roles       -> AdminRoleModel.php       -> AdminRoleRepository.php
-km_admin_permissions -> AdminPermissionModel.php -> AdminPermissionRepository.php
-km_admin_personal_access_tokens -> AdminPersonalAccessTokenModel.php -> AdminPersonalAccessTokenRepository.php
 ```
 
 Model 定义表映射、字段、关联和作用域；Repository 只注入对应 Model，封装该表全部数据库访问。

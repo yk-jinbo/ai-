@@ -3,8 +3,6 @@
 use App\Enums\ApiCode;
 use App\Helpers\ResponseHelper;
 use App\Http\Middleware\AuthenticateMemberToken;
-use App\Http\Middleware\CheckPermission;
-use App\Http\Middleware\EnsureAccountStatus;
 use Exception as GlobalException;
 use Illuminate\Auth\AuthenticationException;
 use Illuminate\Database\QueryException;
@@ -27,8 +25,6 @@ return Application::configure(basePath: dirname(__DIR__))
     ->withMiddleware(function (Middleware $middleware): void {
         $middleware->redirectGuestsTo(null);
         $middleware->alias([
-            'account.status' => EnsureAccountStatus::class,
-            'permission' => CheckPermission::class,
             'member.auth' => AuthenticateMemberToken::class,
         ]);
     })

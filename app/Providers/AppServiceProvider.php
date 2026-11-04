@@ -3,7 +3,6 @@
 namespace App\Providers;
 
 use App\Caches\CacheManager;
-use App\Models\AdminPersonalAccessTokenModel;
 use App\Services\ExternalAuthClient;
 use App\Services\HttpExternalAuthClient;
 use App\Services\CertificateClient;
@@ -11,7 +10,6 @@ use App\Services\HttpCertificateClient;
 use Illuminate\Contracts\Redis\Factory;
 use Illuminate\Foundation\Application;
 use Illuminate\Support\ServiceProvider;
-use Laravel\Sanctum\Sanctum;
 
 class AppServiceProvider extends ServiceProvider
 {
@@ -34,15 +32,5 @@ class AppServiceProvider extends ServiceProvider
                 (string) config('cache.redis_connection', 'cache'),
             );
         });
-    }
-
-    /**
-     * 配置 Sanctum 的遗留管理员令牌模型。
-     *
-     * @return void
-     */
-    public function boot(): void
-    {
-        Sanctum::usePersonalAccessTokenModel(AdminPersonalAccessTokenModel::class);
     }
 }

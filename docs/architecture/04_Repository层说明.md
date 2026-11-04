@@ -9,7 +9,6 @@ Repository 与业务表、Model 一一对应。文件名和类名使用业务实
 ```text
 AdminUserModel       <-> AdminUserRepository
 AdminRoleModel       <-> AdminRoleRepository
-AdminPermissionModel <-> AdminPermissionRepository
 ```
 
 ## 职责

@@ -10,7 +10,7 @@
 - **框架**：Laravel 13（PHP ^8.3）。
 - **数据层**：外部 MySQL 主库 + Redis（`.env` 指向 `host.docker.internal`）。
 - **部署**：Docker Compose（PHP-FPM + Nginx）；宿主机端口由 `.env` 的 `PC_MANAGEMENT_HTTP_PORT` 配置。
-- **认证**：Laravel Sanctum Personal Access Token，有效期 7 天；使用自定义 `km_admin_personal_access_tokens` 表；同一账号只允许一份有效凭证。
+- **认证**：会员令牌由上游 IAM 签发并保存于 Redis，由 `member.auth` 中间件校验；后台账号表只由 `KmAuthSeeder` 初始化，暂未接入接口。
 - **路由**：属性路由（注解）`spatie/laravel-route-attributes`，只扫描 `app/Http/Controllers/Api/`。
 - **响应**：统一 `ResponseHelper` → `{ code, message, data }`；全局异常渲染已配置于 `bootstrap/app.php`。
 - **业务码**：`App\Enums\ApiCode`（int backed enum，`SUCCESS=0`、`ERROR=-1`、`INVALID_PARAMS=-1001`、`UNAUTHORIZED=-1002`、`FORBIDDEN=-1003`、`NOT_FOUND=-1004`、`CONFLICT=-1005`）。
@@ -20,7 +20,7 @@
 | 状态 | 内容 | 说明 |
 | --- | --- | --- |
 | ✅ 已实现 | `GET /api/health`；`ApiCode`、`UserStatus` 枚举；`ResponseHelper`；全局异常渲染（`bootstrap/app.php`）；`ApiCodeTest`、`ResponseHelperTest`、健康接口 Feature 测试 | 有代码或测试支撑 |
-| ✅ 已实现 | 认证系统：`POST /api/auth/login`、`GET /api/auth/me`、`POST /api/auth/logout`；Laravel Sanctum + `km_admin_personal_access_tokens`；RBAC 权限中间件（`account.status`、`permission`）；`km_admin_users`、`km_admin_roles`、`km_admin_permissions`、`km_admin_user_roles`、`km_admin_role_permissions`、`km_admin_personal_access_tokens` 六张表；`KmAuthSeeder` | 完整认证和 RBAC 闭环，有测试 |
+| ✅ 已实现 | 会员认证：`/api/auth/captcha`、`/api/auth/sms/send`、`/api/auth/login/password`、`/api/auth/login/sms`、`/api/auth/login/confirm`、`/api/auth/logout`、登录协议查询；上游 IAM 签发令牌，`member.auth` 从 Redis 校验；`KmAuthSeeder` 初始化后台账号与超管角色 | 认证链路有测试；后台管理表暂无接口使用 |
 | ✅ 已实现 | `CacheManager`、`CacheScope`；`config/cache.php` redis_connection/namespace/version/hash_key；`CacheScopeTest` | Redis Factory 注入、HMAC key，直接使用 Redis 命令，未绑定业务缓存类 |
 | ⚠️ Demo/示例 | `DemoProductController`、`DemoProductRequest`、`DemoProductService`、`DemoProductRepository`、`DemoProductModel` 模型；`docs/architecture/*` | Controller/Request 一一对应，Factory 和 Feature 测试已补齐；仍是学习材料，未验收，不得作为已交付能力描述 |
 | ✅ 外部数据库 | 数据库表结构由开发者在数据库侧人工建立和维护；开发与镜像两套 Compose 均只启动 app/nginx，不创建 db/redis | 应用通过 `DB_*` 连接外部依赖 |
@@ -54,7 +54,7 @@ Request(FormRequest)
 3. Model 与 Repository 按业务数据表一一对应——物理表 `km_admin_users` 映射为 `AdminUserModel` 和 `AdminUserRepository`；类名、文件名和 `$table` 使用去掉物理前缀后的完整逻辑表名，`km_` 由 `config/database.php` 的连接前缀统一追加。Repository 只能注入对应 Model，禁止使用 `AuthRepository` 等流程名聚合多个表。
 4. Repository 是必需层——**所有数据库查询（含简单 CRUD）必须收敛到对应 Repository**，Service 内禁止直接使用 `Model::` / Query Builder 查询；关联关系和查询作用域定义在 Model，Repository 调用这些定义完成关联查询。
 5. Request 负责验证——每个资源的 Controller 对应一个同实体 Request，由 Request 按 Controller 动作分发规则；**永远不要在 Controller 里写 `$request->validate()` 或其他验证逻辑**。
-6. 统一响应——所有 API 必须通过 `ResponseHelper` 返回 `code/message/data`，**禁止自行拼 JSON**（`UserController.php` 中的旧式手拼响应属于反例，勿模仿）；Controller 直接 `return ResponseHelper::xxx(...)`，**禁止再 `response()->json()` 二次包装**。
+6. 统一响应——所有 API 必须通过 `ResponseHelper` 返回 `code/message/data`，**禁止自行拼 JSON**；Controller 直接 `return ResponseHelper::xxx(...)`，**禁止再 `response()->json()` 二次包装**。
 
 ---
 
@@ -69,11 +69,10 @@ pc-management-system/
 │   ├── Http/
 │   │   ├── Controllers/
 │   │   │   ├── Controller.php    # 基类
-│   │   │   ├── Api/              # ⚠️ 唯一会被注解路由扫描的目录
-│   │   │   │   └── {模块}/       # 按业务模块分子目录（如 Product/）
-│   │   │   └── UserController.php  # ⚠️ 遗留 Demo，位于扫描范围外，勿新增此类文件
+│   │   │   └── Api/              # ⚠️ 唯一会被注解路由扫描的目录
+│   │   │       └── {模块}/       # 按业务模块分子目录（如 Product/）
 │   │   ├── Requests/             # FormRequest：每个 Controller 对应一个同实体 Request
-│   │   └── Middleware/           # 认证、账号状态和权限中间件
+│   │   └── Middleware/           # 会员令牌认证中间件
 │   ├── Models/                   # 每张业务表一个 {实体}Model
 │   ├── Repositories/             # 每个 Model 对应一个 {实体}Repository
 │   ├── Services/                 # 业务逻辑层
@@ -857,7 +856,7 @@ enum UserStatus: string
 | 更新 | PUT/PATCH | `/{id}` | `api.{m}.update` |
 | 删除 | DELETE | `/{id}` | `api.{m}.destroy` |
 
-5. **需要认证的路由**按已确认需求在注解上声明认证与权限中间件。
+5. **需要认证的路由**按已确认需求在注解上声明认证中间件。
 6. 验证路由是否注册：`docker compose -f docker-compose.image.yml exec -T app php artisan route:list --path=api`（主机 PHP 7.4 不满足 `^8.3`，统一在容器内执行）。
 
 ---
@@ -994,7 +993,7 @@ enum UserStatus: string
 
 - **位置**：HTTP / 数据库 / JSON 契约测试 → `tests/Feature/`（按模块分子目录，如 `tests/Feature/Product/`）；纯逻辑（无 I/O）→ `tests/Unit/`。
 - **命名**：文件 `*Test.php`（`PascalCase`）；方法 `test_` 前缀（如 `test_valid_login`）。
-- **必须使用** `RefreshDatabase`；构造测试数据用 Factory（`AdminUserModel::factory()->create([...])`）。
+- **必须使用** `RefreshDatabase`；构造测试数据用 Factory（`DemoProductModel::factory()->create([...])`）。
 - **断言**：`assertStatus()` + `assertJsonStructure()` + `assertJson()`，校验 code/message/data 契约。
 - **覆盖要求**：每个新接口必须覆盖 ①成功场景 ②校验失败（422）③关键错误状态（401/404/400）；合并前运行完整测试套件。
 - **隔离**：`phpunit.xml` 为 `mysql` 连接使用 SQLite 内存库，另使用 array cache/session、sync queue；测试**不得连接外部开发/生产数据库**。
