@@ -11,32 +11,6 @@ km_admin_users -> app/Models/AdminUserModel.php -> AdminUserModel
 km_admin_roles -> app/Models/AdminRoleModel.php -> AdminRoleModel
 ```
 
-## 双数据库 Model 归属
-
-Model 必须固定声明所属连接，不能在运行时根据请求参数切换：
-
-```php
-class MemberModel extends Model
-{
-    public const TABLE = 'member';
-
-    protected $connection = 'mysql';
-
-    protected $table = self::TABLE;
-}
-
-class BridgeRecordModel extends Model
-{
-    public const TABLE = 'bridge_records';
-
-    protected $connection = 'data_bridge';
-
-    protected $table = self::TABLE;
-}
-```
-
-`$table` 写逻辑表名，物理前缀由对应连接的 `prefix` 统一追加。例如 `BridgeRecordModel::TABLE` 为 `bridge_records` 时，`data_bridge` 的 `km_` 前缀会映射到物理表 `km_bridge_records`。
-
 ## 职责
 
 Model 负责：
@@ -119,7 +93,6 @@ public function loadRoles(AdminUserModel $user): AdminUserModel
 - 在 Model 中开启或提交事务；
 - 在 Model 中编排多个 Repository 或 Service；
 - Service/Controller 直接执行 Model 查询。
-- 在 Model 方法内切换连接或根据外部输入拼接连接名。
 
 ## 自查
 

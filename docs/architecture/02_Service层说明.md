@@ -16,42 +16,6 @@ Service 是业务中心，负责：
 
 Service 禁止直接使用 `Model::`、`new Model`、Eloquent Query Builder 或 `DB::table()` 查询。数据库访问必须进入对应 Repository。
 
-## 双数据库流程示例：A 库查询、B 库写入
-
-假设 `MemberRepository` 访问主库，`BridgeRecordRepository` 访问 `data_bridge` 库：
-
-```php
-class MemberBridgeService
-{
-    public function __construct(
-        private MemberRepository $memberRepository,
-        private BridgeRecordRepository $bridgeRecordRepository,
-    ) {}
-
-    public function syncMember(int $memberId): BridgeRecordModel
-    {
-        $member = $this->memberRepository->findById($memberId);
-        ResponseHelper::errorIf(! $member, '会员不存在');
-
-        return DB::connection('data_bridge')->transaction(function () use ($member): BridgeRecordModel {
-            return $this->bridgeRecordRepository->create([
-                'source_member_id' => $member->getKey(),
-                'member_name' => $member->name,
-                'sync_key' => 'member:'.$member->getKey(),
-            ]);
-        });
-    }
-}
-```
-
-实现要求：
-
-- A 库查询通过 A 库 Repository，B 库写入通过 B 库 Repository。
-- B 库写入使用业务唯一键（示例中的 `sync_key`）保证重复执行幂等；数据库侧应建立唯一索引。
-- B 库写入失败时只回滚 B 库事务，不能声称 A 库已经回滚。
-- 如果同一流程还要修改 A 库，必须分别使用 `DB::connection('mysql')->transaction(...)` 和 `DB::connection('data_bridge')->transaction(...)`，并设计重试或补偿。
-- 禁止在一条 SQL 中跨库 JOIN；需要组合结果时在 Service 层按业务键组装。
-
 ## 标准写法
 
 ```php

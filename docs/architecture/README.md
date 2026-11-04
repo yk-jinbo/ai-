@@ -15,7 +15,6 @@
    - 各层职责速查表
    - 数据流转示例
    - 一表一 Model/Repository 规则
-   - `mysql` / `data_bridge` 双数据库开发规范与跨库示例
 
 2. **[控制器层（Controller）](01_Controller层说明.md)**
    - 作用：HTTP 入口层
@@ -107,7 +106,6 @@ Model 定义表映射、字段、关联和作用域；Repository 只注入对应
 | 我想... | 看这个 |
 |---------|--------|
 | 了解整体架构 | [架构总览](00_架构总览.md) |
-| 使用两个数据库 | [架构总览](00_架构总览.md)、[服务层（Service）](02_Service层说明.md) |
 | 写业务逻辑 | [服务层（Service）](02_Service层说明.md) |
 | 写 API 接口 | [控制器层（Controller）](01_Controller层说明.md) |
 | 定义数据表、关联和作用域 | [模型层（Model）](03_Model层说明.md) |

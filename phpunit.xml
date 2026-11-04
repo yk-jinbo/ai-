@@ -23,9 +23,6 @@
         <env name="CACHE_STORE" value="array" force="true"/>
         <env name="DB_CONNECTION" value="sqlite" force="true"/>
         <env name="DB_DATABASE" value=":memory:" force="true"/>
-        <env name="DATA_BRIDGE_DB_CONNECTION" value="sqlite" force="true"/>
-        <env name="DATA_BRIDGE_DB_DATABASE" value=":memory:" force="true"/>
-        <env name="DATA_BRIDGE_DB_PREFIX" value="km_" force="true"/>
         <env name="MAIL_MAILER" value="array" force="true"/>
         <env name="QUEUE_CONNECTION" value="sync" force="true"/>
         <env name="SESSION_DRIVER" value="array" force="true"/>
@@ -40,9 +37,6 @@
         <server name="CACHE_STORE" value="array"/>
         <server name="DB_CONNECTION" value="sqlite"/>
         <server name="DB_DATABASE" value=":memory:"/>
-        <server name="DATA_BRIDGE_DB_CONNECTION" value="sqlite"/>
-        <server name="DATA_BRIDGE_DB_DATABASE" value=":memory:"/>
-        <server name="DATA_BRIDGE_DB_PREFIX" value="km_"/>
         <server name="MAIL_MAILER" value="array"/>
         <server name="QUEUE_CONNECTION" value="sync"/>
         <server name="SESSION_DRIVER" value="array"/>
