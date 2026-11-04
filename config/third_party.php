@@ -7,13 +7,12 @@
  * 只需要维护本文件，不要在 Controller 或 Service 中拼接 URL。
  */
 $memberAuthBaseUrl = rtrim((string) env('MEMBER_AUTH_BASE_URL'), '/');
-$assetBaseUrl = rtrim((string) env('ASSET_API_BASE_URL'), '/');
-$assetBaseUrl = $assetBaseUrl !== '' ? $assetBaseUrl : $memberAuthBaseUrl;
 $assetSummaryUrl = trim((string) env('ASSET_SUMMARY_URL'));
 $assetRecordsUrl = trim((string) env('ASSET_RECORDS_URL'));
 $assetNetInflowRecordsUrl = trim((string) env('ASSET_NET_INFLOW_RECORDS_URL'));
 $businessTypesUrl = trim((string) env('BUSINESS_TYPES_URL'));
-$assessmentInfoBaseUrl = $assetBaseUrl;
+$memberIdentitiesUrl = trim((string) env('MEMBER_IDENTITIES_URL'));
+$assessmentInfoBaseUrl = $memberAuthBaseUrl;
 $assessmentInfoUrls = [
     //个人易货
     'MEMBER_TRADE' => $assessmentInfoBaseUrl.'/api/v1/computing/query/trades/personal/summary',
@@ -44,22 +43,28 @@ return [
         'base_url' => $memberAuthBaseUrl,
     ],
 
+    'member' => [
+        'identities' => $memberIdentitiesUrl !== ''
+            ? $memberIdentitiesUrl
+            : $memberAuthBaseUrl.'/api/v1/computing/query/members/identities',
+    ],
+
     'assets' => [
         'summary' => $assetSummaryUrl !== ''
             ? $assetSummaryUrl
-            : $assetBaseUrl.'/api/v1/computing/query/assets/summary',
+            : $memberAuthBaseUrl.'/api/v1/computing/query/assets/summary',
         'records' => $assetRecordsUrl !== ''
             ? $assetRecordsUrl
-            : $assetBaseUrl.'/api/v1/computing/query/assets/records',
+            : $memberAuthBaseUrl.'/api/v1/computing/query/assets/records',
         'net_inflow_records' => $assetNetInflowRecordsUrl !== ''
             ? $assetNetInflowRecordsUrl
-            : $assetBaseUrl.'/api/v1/computing/query/organizations/net-deposits',
+            : $memberAuthBaseUrl.'/api/v1/computing/query/organizations/net-deposits',
     ],
 
     'assessment' => [
         'business_types' => $businessTypesUrl !== ''
             ? $businessTypesUrl
-            : $assetBaseUrl.'/api/v1/computing/query/business-types',
+            : $memberAuthBaseUrl.'/api/v1/computing/query/business-types',
         'info' => $assessmentInfoUrls,
     ],
 ];

@@ -61,6 +61,10 @@ return [
         'url' => $thirdParty['assets']['net_inflow_records'],
     ],
 
+    'member_identities' => [
+        'url' => $thirdParty['member']['identities'],
+    ],
+
     'business_types' => [
         'url' => $thirdParty['assessment']['business_types'],
     ],
