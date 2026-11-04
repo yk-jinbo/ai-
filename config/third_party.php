@@ -38,6 +38,7 @@ $assessmentInfoUrls = [
     'INCUBATION' => $assessmentInfoBaseUrl.'/api/v1/computing/query/assessments/incubation',
 ];
 
+
 return [
     'member_auth' => [
         'base_url' => $memberAuthBaseUrl,
