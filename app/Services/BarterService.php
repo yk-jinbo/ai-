@@ -40,6 +40,10 @@ class BarterService
                 'memberType' => $memberType,
             ],
             isSuccessful: static fn (Response $response): bool => $response->successful(),
+            options: [
+                'connect_timeout' => 5,
+                'timeout' => 15,
+            ],
             service: 'home_indicators',
         );
 
