@@ -7,7 +7,7 @@ use App\Enums\ApiCode;
 /**
  * 数证中转业务服务。
  *
- * 负责把登录身份和请求参数交给数证客户端，并执行 PER 主体一致性校验。
+ * 转发数证查询，并通过会员资料接口取得 PER 查询使用的登录会员 ID。
  */
 class CertificateService
 {
@@ -24,18 +24,31 @@ class CertificateService
     }
 
     /**
-     * @param  array<string, mixed>  $memberInfo
+     * 先查询当前会员资料，再以 data.id 作为 memberId 查询 PER 权证。
+     * 资料查询失败或 ID 无效时终止调用，不使用前端参数或本地缓存 ID 回退。
+     *
+     * @param  string  $token  当前请求的 Bearer Token
+     * @return CertificateProxyResult PER 权证列表、资料查询错误或资料格式错误
      */
-    public function perList(int $memberId, array $memberInfo, string $token): CertificateProxyResult
+    public function perList(string $token): CertificateProxyResult
     {
-        $currentMemberId = filter_var($memberInfo['member_id'] ?? null, FILTER_VALIDATE_INT);
-        if ($currentMemberId === false || $currentMemberId === null || $currentMemberId <= 0 || $currentMemberId !== $memberId) {
+        $profile = $this->certificateClient->memberProfile($token);
+        if ($profile->code !== ApiCode::SUCCESS->value) {
+            return $profile;
+        }
+
+        $id = is_array($profile->data) ? ($profile->data['id'] ?? null) : null;
+        $memberId = is_int($id) || is_string($id)
+            ? filter_var($id, FILTER_VALIDATE_INT, ['options' => ['min_range' => 1]])
+            : false;
+        if ($memberId === false) {
             return new CertificateProxyResult(
                 data: null,
-                message: '请求会员与登录会员不一致',
-                code: ApiCode::FORBIDDEN->value,
-                httpStatus: 403,
-                traceId: null,
+                message: '会员资料响应缺少有效会员ID',
+                code: ApiCode::ERROR->value,
+                httpStatus: 502,
+                traceId: $profile->traceId,
+                extra: $profile->extra,
             );
         }
 

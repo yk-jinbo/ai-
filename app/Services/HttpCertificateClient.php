@@ -14,11 +14,24 @@ use Throwable;
  */
 class HttpCertificateClient implements CertificateClient
 {
+    private const MEMBER_PROFILE_PATH = '/api-iam/api/v1/member/profile';
+
     private const MEMBER_LIST_PATH = '/api-iam/api/v1/member/certificate/list';
 
     private const PER_LIST_PATH = '/point-partner-api/api/v1/points/per-certificates';
 
     public function __construct(private ExternalHttpClient $http) {}
+
+    /**
+     * 携带当前令牌查询会员资料，复用身份网关、响应转换和失败日志。
+     *
+     * @param  string  $token  当前请求的 Bearer Token
+     * @return CertificateProxyResult 会员资料或标准化失败结果
+     */
+    public function memberProfile(string $token): CertificateProxyResult
+    {
+        return $this->get(self::MEMBER_PROFILE_PATH, $token);
+    }
 
     public function memberCertificates(string $token): CertificateProxyResult
     {
