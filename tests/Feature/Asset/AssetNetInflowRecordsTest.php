@@ -47,11 +47,11 @@ class AssetNetInflowRecordsTest extends TestCase
     }
 
     /**
-     * 验证空日期不会进入组织净入金第三方报文
+     * 验证前端省略全部时间字段时不会向第三方补充时间
      *
      * @return void
      */
-    public function test_omits_null_date_range_from_upstream_request(): void
+    public function test_omits_all_unprovided_dates_from_upstream_request(): void
     {
         $data = ['items' => [], 'total' => 0, 'pageNo' => 1, 'pageSize' => 20];
         Http::fake([
@@ -63,7 +63,6 @@ class AssetNetInflowRecordsTest extends TestCase
         ]);
 
         $response = $this->withToken(self::TOKEN)->postJson('/api/asset/net-inflow-records', [
-            'asOfDate' => '2026-10-27',
             'assessmentType' => 'OPERATION_CENTER',
             'orgId' => '30001',
             'periodType' => 'QUARTER',
@@ -80,7 +79,6 @@ class AssetNetInflowRecordsTest extends TestCase
             'token' => self::TOKEN,
             'mobile' => '13900001111',
             'memberType' => 'NORMAL',
-            'asOfDate' => '2026-10-27',
             'assessmentType' => 'OPERATION_CENTER',
             'orgId' => '30001',
             'periodType' => 'QUARTER',

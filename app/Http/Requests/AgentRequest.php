@@ -9,7 +9,7 @@ use LogicException;
 
 /**
  * 代理接口请求校验器
- * 按代理控制器动作约束收益日期、分页和可选筛选参数
+ * 按代理控制器动作约束分页和可选筛选参数，时间内容交由第三方处理
  */
 class AgentRequest extends FormRequest
 {
@@ -46,9 +46,8 @@ class AgentRequest extends FormRequest
     public function messages(): array
     {
         return [
-            'fromDate.date_format' => '收益起始日期格式必须为 YYYY-MM-DD',
-            'toDate.date_format' => '收益截止日期格式必须为 YYYY-MM-DD',
-            'toDate.after_or_equal' => '收益截止日期不能早于起始日期',
+            'fromDate.string' => '收益起始时间必须是字符串',
+            'toDate.string' => '收益截止时间必须是字符串',
             'pageNo.integer' => '页码必须是整数',
             'pageNo.min' => '页码必须从1开始',
             'pageSize.integer' => '每页数量必须是整数',
@@ -83,14 +82,9 @@ class AgentRequest extends FormRequest
     /** @return array<string, mixed> 代理收益查询字段校验规则 */
     private function rulesForGetEarnings(): array
     {
-        $toDateRules = ['nullable', 'date_format:Y-m-d'];
-        if ($this->filled('fromDate')) {
-            $toDateRules[] = 'after_or_equal:fromDate';
-        }
-
         return [
-            'fromDate' => ['nullable', 'date_format:Y-m-d'],
-            'toDate' => $toDateRules,
+            'fromDate' => ['nullable', 'string'],
+            'toDate' => ['nullable', 'string'],
             'pageNo' => ['nullable', 'integer', 'min:1'],
             'pageSize' => ['nullable', 'integer', 'min:1', 'max:100'],
             'agentType' => ['nullable', Rule::enum(AgentType::class)],

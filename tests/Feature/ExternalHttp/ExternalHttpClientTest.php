@@ -290,6 +290,28 @@ class ExternalHttpClientTest extends TestCase
 
         $this->assertSame('张三', $result['data'][0]['fan_name']);
         $this->assertSame('张', $result['data'][0]['fan_name_abbr']);
+        $this->assertSame('*******0001', $result['data'][0]['mobile']);
+    }
+
+    /** 验证关系列表返回的手机号统一隐藏中间四位。 */
+    public function test_relation_lists_mask_mobile_fields(): void
+    {
+        config()->set('services.external_http.gateways.default', 'http://192.168.11.202:8082');
+        Http::fakeSequence()
+            ->push(['code' => 'OK', 'data' => ['items' => [[
+                'member' => ['mobile' => '13812345678', 'memberName' => '团队成员'],
+            ]]]])
+            ->push(['code' => 'OK', 'data' => ['items' => [[
+                'bizDate' => '2026-08-01', 'exchangeAmount' => '10.00', 'mobile' => '13912345678',
+            ]]]]);
+        $service = $this->app->make(RelationService::class);
+        $user = ['mobile' => '15012345678', 'member_type' => 'NORMAL'];
+
+        $team = $service->getTeamList(1, 10, $user, 'test-token');
+        $flows = $service->getExchangeStatisticsList('2026-08-01', '2026-08-01', $user, 'test-token');
+
+        $this->assertSame('*******5678', $team['data'][0]['mobile']);
+        $this->assertSame('*******5678', $flows[0]['mobile']);
     }
 
     /** 验证关系接口把登录 token 去掉 Bearer 前缀后作为 JSON 字段传给上游。 */
