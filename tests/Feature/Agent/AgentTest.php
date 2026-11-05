@@ -115,17 +115,31 @@ class AgentTest extends TestCase
         Http::assertNothingSent();
     }
 
-    public function test_rejects_reversed_date_range(): void
+    public function test_passes_time_values_without_local_time_validation(): void
     {
-        Http::fake();
-
-        $response = $this->withToken(self::TOKEN)->postJson('/api/agent/get-earnings', [
-            'fromDate' => '2026-10-27',
-            'toDate' => '2026-10-01',
+        Http::fake([
+            self::UPSTREAM_URL => Http::response([
+                'code' => '0000',
+                'message' => '成功',
+                'data' => [],
+            ]),
         ]);
 
-        $response->assertUnprocessable()->assertJsonPath('code', ApiCode::INVALID_PARAMS->value);
-        Http::assertNothingSent();
+        $response = $this->withToken(self::TOKEN)->postJson('/api/agent/get-earnings', [
+            'fromDate' => '2026/10/27 18:30:00',
+            'toDate' => '2026/10/01 09:00:00',
+        ]);
+
+        $response->assertOk();
+        Http::assertSent(fn (Request $request): bool => $request->data() === [
+            'token' => self::TOKEN,
+            'mobile' => '13900001111',
+            'memberType' => 'NORMAL',
+            'fromDate' => '2026/10/27 18:30:00',
+            'toDate' => '2026/10/01 09:00:00',
+            'pageNo' => 1,
+            'pageSize' => 20,
+        ]);
     }
 
     public function test_rejects_missing_token_without_calling_upstream(): void
