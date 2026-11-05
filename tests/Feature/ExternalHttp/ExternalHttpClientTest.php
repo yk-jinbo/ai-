@@ -341,6 +341,24 @@ class ExternalHttpClientTest extends TestCase
             && $request['token'] === 'relation-test-token');
     }
 
+    /** Verify missing or blank exchange flow dates default to October 1 through today. */
+    public function test_relation_exchange_statistics_list_defaults_empty_dates(): void
+    {
+        config()->set('services.external_http.gateways.default', 'http://192.168.11.202:8082');
+        $this->mock(AuthTokenService::class)
+            ->shouldReceive('currentUser')
+            ->once()
+            ->andReturn(['mobile' => '13812345678', 'member_type' => 'NORMAL']);
+        Http::fake(['*' => Http::response(['code' => 'OK', 'data' => ['total' => 0, 'items' => []]])]);
+
+        $this->withToken('relation-test-token')
+            ->getJson('/api/relation/exchange-statistics-list?start_date=&end_date=')
+            ->assertOk();
+
+        Http::assertSent(fn (ClientRequest $request): bool => $request['fromDate'] === '2026-10-01'
+            && $request['toDate'] === date('Y-m-d'));
+    }
+
     /** 验证 HTTP 错误只记录一次，保留上游状态、业务码和追踪标识。 */
     public function test_http_error_is_logged_once_with_diagnostic_context(): void
     {

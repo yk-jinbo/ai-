@@ -11,6 +11,18 @@ use LogicException;
  */
 class RelationRequest extends FormRequest
 {
+    protected function prepareForValidation(): void
+    {
+        if (in_array($this->controllerAction(), ['exchangeStatisticsList'], true)
+            && blank($this->query('start_date'))
+            && blank($this->query('end_date'))) {
+            $this->merge([
+                'start_date' => '2026-10-01',
+                'end_date' => date('Y-m-d'),
+            ]);
+        }
+    }
+
     /**
      * Demo 接口暂不要求认证，允许请求进入参数校验。
      */
