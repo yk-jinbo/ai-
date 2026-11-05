@@ -327,6 +327,7 @@ class RelationService
         }
 
         $items = [];
+        $items['total_exchange_amount'] = $item['memberDailyExchangeAmount'] ?? '0.00';
         foreach ($data['items'] ?? [] as $item) {
             $mappedItem = [
                 'date' => $item['bizDate'] ?? '',
@@ -335,17 +336,17 @@ class RelationService
             if (array_key_exists('mobile', $item)) {
                 $mappedItem['mobile'] = $this->maskMobile($item['mobile']);
             }
-            $items[] = $mappedItem;
+            $items['list'][] = $mappedItem;
         }
 
-        usort($items, static fn (array $left, array $right): int => strcmp($left['date'], $right['date']));
+        usort($items['list'], static fn (array $left, array $right): int => strcmp($left['date'], $right['date']));
 
         $previousAmount = null;
-        foreach ($items as $index => $item) {
+        foreach ($items['list'] as $index => $item) {
             $exchangeAmount = (float) $item['exchange_amount'];
             $difference = $previousAmount === null ? 0 : abs($exchangeAmount - $previousAmount);
-            $items[$index]['difference_from_previous_day'] = number_format($difference, 2, '.', '');
-            $items[$index]['difference_previous_day_type'] = $previousAmount === null || $exchangeAmount >= $previousAmount;
+            $items['list'][$index]['difference_from_previous_day'] = number_format($difference, 2, '.', '');
+            $items['list'][$index]['difference_previous_day_type'] = $previousAmount === null || $exchangeAmount >= $previousAmount;
             $previousAmount = $exchangeAmount;
         }
 
