@@ -136,13 +136,12 @@ class AssetService
     private function netInflowRecordParameters(array $member, string $token, array $filters): array
     {
         $parameters = array_merge($this->memberIdentityParameters->make($member, $token), [
-            'asOfDate' => (string) ($filters['asOfDate'] ?? now()->toDateString()),
             'assessmentType' => (string) $filters['assessmentType'],
             'orgId' => (string) $filters['orgId'],
             'periodType' => (string) $filters['periodType'],
         ]);
 
-        foreach (['fromDate', 'toDate'] as $field) {
+        foreach (['asOfDate', 'fromDate', 'toDate'] as $field) {
             if (isset($filters[$field]) && $filters[$field] !== '') {
                 $parameters[$field] = (string) $filters[$field];
             }
