@@ -48,6 +48,7 @@ return [
         'identities' => $memberIdentitiesUrl !== ''
             ? $memberIdentitiesUrl
             : $memberAuthBaseUrl.'/api/v1/computing/query/members/identities',
+        'operation_centers' => $memberAuthBaseUrl.'/api/v1/computing/query/organizations/operation-centers',
     ],
 
     'agent' => [

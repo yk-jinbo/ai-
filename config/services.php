@@ -65,6 +65,10 @@ return [
         'url' => $thirdParty['member']['identities'],
     ],
 
+    'member_operation_centers' => [
+        'url' => $thirdParty['member']['operation_centers'],
+    ],
+
     'agent_earnings' => [
         'url' => $thirdParty['agent']['earnings'],
     ],

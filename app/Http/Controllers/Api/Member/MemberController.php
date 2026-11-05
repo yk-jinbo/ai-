@@ -13,7 +13,7 @@ use Spatie\RouteAttributes\Attributes\Prefix;
 
 /**
  * 会员接口控制器
- * 负责接收会员身份查询请求并交由服务层处理
+ * 负责接收会员身份和下属运营中心查询请求并交由服务层处理
  */
 #[Prefix('api')]
 class MemberController extends Controller
@@ -45,6 +45,32 @@ class MemberController extends Controller
         return ResponseHelper::success(
             $this->memberService->getIdentities($member, (string) $request->bearerToken()),
             '获取会员身份及关联组织成功',
+        );
+    }
+
+    /**
+     * 获取分公司下属运营中心考核列表
+     *
+     * 业务逻辑：把已校验的分公司、日期和分页参数连同当前会员身份交给服务层查询。
+     *
+     * @param  MemberRequest  $request  已认证并通过校验的运营中心查询请求
+     * @return JsonResponse 统一结构的运营中心考核列表响应
+     *
+     * @throws \Throwable 第三方接口失败或响应格式异常时抛出
+     */
+    #[Post('/member/operation-centers', name: 'api.member.operation-centers', middleware: [AuthenticateMemberToken::class])]
+    public function operationCenters(MemberRequest $request): JsonResponse
+    {
+        $member = $request->attributes->get('member_auth_user', []);
+        $member = is_array($member) ? $member : [];
+
+        return ResponseHelper::success(
+            $this->memberService->operationCenters(
+                $member,
+                (string) $request->bearerToken(),
+                $request->validated(),
+            ),
+            '获取下属运营中心考核成功',
         );
     }
 }
