@@ -26,16 +26,7 @@ class AssessmentRequest extends FormRequest
     {
         return match ((string) $this->route()?->getActionMethod()) {
             'getList' => [],
-            'assessmentInfo' => [
-                'businessType' => ['required', Rule::enum(AssetBusinessType::class)],
-                'asOfDate' => ['nullable', 'date_format:Y-m-d'],
-                'orgId' => ['required_if:businessType,BRANCH_COMPANY', 'nullable', 'integer'],
-                'merchantId' => ['required_if:businessType,MERCHANT_COMPANY', 'nullable', 'integer'],
-                'fromDate' => ['required_if:businessType,AGENT', 'nullable', 'date_format:Y-m-d'],
-                'toDate' => ['required_if:businessType,AGENT', 'nullable', 'date_format:Y-m-d', 'after_or_equal:fromDate'],
-                'pageNo' => ['nullable', 'integer', 'min:1'],
-                'pageSize' => ['nullable', 'integer', 'min:1', 'max:100'],
-            ],
+            'assessmentInfo' => $this->rulesForAssessmentInfo(),
             default => throw new LogicException('AssessmentRequest 未配置当前 Controller 动作的校验规则'),
         };
     }
@@ -50,9 +41,7 @@ class AssessmentRequest extends FormRequest
             'orgId.integer' => '机构 ID 必须是整数',
             'merchantId.required_if' => '招商公司考核必须传入招商公司 ID',
             'merchantId.integer' => '招商公司 ID 必须是整数',
-            'fromDate.required_if' => '代理查询必须传入开始日期',
             'fromDate.date_format' => '开始日期格式必须为 YYYY-MM-DD',
-            'toDate.required_if' => '代理查询必须传入结束日期',
             'toDate.date_format' => '结束日期格式必须为 YYYY-MM-DD',
             'toDate.after_or_equal' => '结束日期不能早于开始日期',
             'pageNo.integer' => '页码必须是整数',
@@ -74,6 +63,26 @@ class AssessmentRequest extends FormRequest
             'toDate' => '结束日期',
             'pageNo' => '页码',
             'pageSize' => '每页数量',
+        ];
+    }
+
+    /** @return array<string, mixed> 考核信息查询字段校验规则 */
+    private function rulesForAssessmentInfo(): array
+    {
+        $toDateRules = ['nullable', 'date_format:Y-m-d'];
+        if ($this->filled('fromDate')) {
+            $toDateRules[] = 'after_or_equal:fromDate';
+        }
+
+        return [
+            'businessType' => ['required', Rule::enum(AssetBusinessType::class)],
+            'asOfDate' => ['nullable', 'date_format:Y-m-d'],
+            'orgId' => ['required_if:businessType,BRANCH_COMPANY', 'nullable', 'integer'],
+            'merchantId' => ['required_if:businessType,MERCHANT_COMPANY', 'nullable', 'integer'],
+            'fromDate' => ['nullable', 'date_format:Y-m-d'],
+            'toDate' => $toDateRules,
+            'pageNo' => ['nullable', 'integer', 'min:1'],
+            'pageSize' => ['nullable', 'integer', 'min:1', 'max:100'],
         ];
     }
 }

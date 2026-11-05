@@ -2,6 +2,7 @@
 
 namespace App\Services;
 
+use App\Enums\AssetBusinessType;
 use App\Helpers\ResponseHelper;
 use Illuminate\Http\Client\Response;
 
@@ -12,6 +13,10 @@ use Illuminate\Http\Client\Response;
 class AssessmentService
 {
     private const UPSTREAM_SUCCESS_CODE = '0000';
+
+    private const DEFAULT_PAGE_NO = 1;
+
+    private const DEFAULT_PAGE_SIZE = 20;
 
     /**
      * 注入通用外部请求客户端
@@ -73,7 +78,10 @@ class AssessmentService
         $url = config('services.assessment_info.urls.'.$businessType);
         ResponseHelper::errorIf(! is_string($url) || trim($url) === '', '该业务类型的第三方接口尚未配置');
 
-        $upstreamParameters = array_merge($parameters, $this->memberIdentityParameters->make($member, $token));
+        $upstreamParameters = array_merge(
+            $this->parametersForBusinessType($businessType, $parameters),
+            $this->memberIdentityParameters->make($member, $token),
+        );
 
         $response = $this->http->post(
             url: $url,
@@ -95,6 +103,50 @@ class AssessmentService
         ResponseHelper::errorIf(! is_array($data), '考核信息服务响应格式异常');
 
         return $data;
+    }
+
+    /**
+     * 按业务类型筛选第三方接口允许接收的参数
+     *
+     * @param  string  $businessType  已通过枚举校验的业务类型
+     * @param  array<string, mixed>  $parameters  已通过请求校验的业务参数
+     * @return array<string, mixed> 当前第三方接口允许接收的参数
+     */
+    private function parametersForBusinessType(string $businessType, array $parameters): array
+    {
+        if ($businessType === AssetBusinessType::AGENT->value) {
+            return $this->agentExchangeParameters($parameters);
+        }
+
+        foreach (['asOfDate', 'fromDate', 'toDate'] as $field) {
+            if (! isset($parameters[$field]) || $parameters[$field] === '') {
+                unset($parameters[$field]);
+            }
+        }
+
+        return $parameters;
+    }
+
+    /**
+     * 组装代理兑换接口参数
+     *
+     * @param  array<string, mixed>  $parameters  已通过请求校验的代理查询参数
+     * @return array<string, int|string> 不含其他业务类型字段的代理兑换参数
+     */
+    private function agentExchangeParameters(array $parameters): array
+    {
+        $agentParameters = [];
+
+        foreach (['fromDate', 'toDate'] as $field) {
+            if (isset($parameters[$field]) && $parameters[$field] !== '') {
+                $agentParameters[$field] = (string) $parameters[$field];
+            }
+        }
+
+        $agentParameters['pageNo'] = (int) ($parameters['pageNo'] ?? self::DEFAULT_PAGE_NO);
+        $agentParameters['pageSize'] = (int) ($parameters['pageSize'] ?? self::DEFAULT_PAGE_SIZE);
+
+        return $agentParameters;
     }
 
     /**

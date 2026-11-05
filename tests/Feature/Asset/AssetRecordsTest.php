@@ -2,10 +2,14 @@
 
 namespace Tests\Feature\Asset;
 
+use App\Caches\CacheManager;
 use App\Enums\ApiCode;
+use Illuminate\Contracts\Redis\Factory;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Http\Client\Request;
+use Illuminate\Redis\Connections\Connection;
 use Illuminate\Support\Facades\Http;
+use Mockery;
 use Tests\TestCase;
 
 /**
@@ -16,7 +20,31 @@ class AssetRecordsTest extends TestCase
 {
     use RefreshDatabase;
 
+    private const TOKEN = 'asset-records-access-token';
+
     private const UPSTREAM_URL = 'https://assets.example.test/api/assets/records';
+
+    /** @var array<string, string> */
+    private array $redisValues = [];
+
+    protected function setUp(): void
+    {
+        parent::setUp();
+        config()->set('cache.hash_key', 'asset-records-test-key');
+        config()->set('services.asset_records.url', self::UPSTREAM_URL);
+
+        $redis = Mockery::mock(Connection::class);
+        $redis->shouldReceive('get')->andReturnUsing(fn (string $key): ?string => $this->redisValues[$key] ?? null);
+        $factory = Mockery::mock(Factory::class);
+        $factory->shouldReceive('connection')->with('cache')->andReturn($redis);
+        $this->app->instance(Factory::class, $factory);
+
+        $scope = $this->app->make(CacheManager::class)->scope('auth-tokens');
+        $this->redisValues[$scope->key(self::TOKEN)] = json_encode([
+            'user' => ['mobile' => '13800000002', 'member_type' => 'NORMAL'],
+        ], JSON_THROW_ON_ERROR | JSON_UNESCAPED_UNICODE);
+        Http::preventStrayRequests();
+    }
 
     /**
      * 验证接口组合 Token 用户信息和前端参数，并返回标准化流水数据
@@ -25,7 +53,6 @@ class AssetRecordsTest extends TestCase
      */
     public function test_returns_asset_records_from_upstream(): void
     {
-        config()->set('services.asset_records.url', self::UPSTREAM_URL);
         Http::fake([
             self::UPSTREAM_URL => Http::response($this->successfulUpstreamResponse()),
         ]);
@@ -37,7 +64,7 @@ class AssetRecordsTest extends TestCase
             'assessmentPeriodType' => 'WEEK',
         ];
 
-        $response = $this->postJson('/api/assets/records', $filters);
+        $response = $this->withToken(self::TOKEN)->postJson('/api/assets/records', $filters);
 
         $response->assertStatus(200);
         $response->assertExactJson([
@@ -58,7 +85,7 @@ class AssetRecordsTest extends TestCase
     public function test_rejects_reversed_date_range(): void
     {
         Http::fake();
-        $response = $this->postJson('/api/assets/records', [
+        $response = $this->withToken(self::TOKEN)->postJson('/api/assets/records', [
             'fromDate' => '2026-10-27',
             'toDate' => '2026-10-01',
         ]);
@@ -79,7 +106,7 @@ class AssetRecordsTest extends TestCase
     public function test_rejects_invalid_filter_values(): void
     {
         Http::fake();
-        $response = $this->postJson('/api/assets/records', [
+        $response = $this->withToken(self::TOKEN)->postJson('/api/assets/records', [
             'fromDate' => '2026-10-01',
             'toDate' => '2026-10-27',
             'pageSize' => 101,
@@ -98,32 +125,45 @@ class AssetRecordsTest extends TestCase
     }
 
     /**
-     * 验证未携带 Token 时返回统一 401 响应
+     * 验证日期范围省略时不向第三方发送日期字段
      *
      * @return void
      */
-    public function test_allows_request_without_token_during_third_party_integration(): void
+    public function test_allows_request_without_date_range(): void
     {
-        config()->set('services.asset_records.url', self::UPSTREAM_URL);
         Http::fake([
             self::UPSTREAM_URL => Http::response($this->successfulUpstreamResponse()),
         ]);
 
-        $response = $this->postJson('/api/assets/records', [
-            'fromDate' => '2026-10-01',
-            'toDate' => '2026-10-27',
+        $response = $this->withToken(self::TOKEN)->postJson('/api/assets/records', [
+            'fromDate' => null,
+            'toDate' => null,
         ]);
 
         $response->assertStatus(200);
         Http::assertSent(fn (Request $request): bool => $request->data() === [
-            'tenantId' => 'demo',
+            'token' => self::TOKEN,
             'mobile' => '13800000002',
             'memberType' => 'NORMAL',
-            'fromDate' => '2026-10-01',
-            'toDate' => '2026-10-27',
             'pageNo' => 1,
             'pageSize' => 20,
         ]);
+    }
+
+    /**
+     * 验证未携带 Token 时返回统一 401 响应
+     *
+     * @return void
+     */
+    public function test_rejects_request_without_token(): void
+    {
+        Http::fake();
+
+        $response = $this->postJson('/api/assets/records');
+
+        $response->assertUnauthorized();
+        $response->assertJsonPath('code', ApiCode::UNAUTHORIZED->value);
+        Http::assertNothingSent();
     }
 
     /**
@@ -133,7 +173,6 @@ class AssetRecordsTest extends TestCase
      */
     public function test_returns_business_error_when_upstream_fails(): void
     {
-        config()->set('services.asset_records.url', self::UPSTREAM_URL);
         Http::fake([
             self::UPSTREAM_URL => Http::response([
                 'code' => '0002',
@@ -141,7 +180,7 @@ class AssetRecordsTest extends TestCase
                 'data' => null,
             ]),
         ]);
-        $response = $this->postJson('/api/assets/records', [
+        $response = $this->withToken(self::TOKEN)->postJson('/api/assets/records', [
             'fromDate' => '2026-10-01',
             'toDate' => '2026-10-27',
         ]);
@@ -163,7 +202,7 @@ class AssetRecordsTest extends TestCase
     private function expectedUpstreamParameters(array $filters): array
     {
         return [
-            'tenantId' => 'demo',
+            'token' => self::TOKEN,
             'mobile' => '13800000002',
             'memberType' => 'NORMAL',
             'fromDate' => $filters['fromDate'],

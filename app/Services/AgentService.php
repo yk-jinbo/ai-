@@ -61,12 +61,16 @@ class AgentService
      */
     private function upstreamParameters(array $member, string $token, array $filters): array
     {
-        $parameters = array_merge($this->memberIdentityParameters->make($member, $token), [
-            'fromDate' => (string) $filters['fromDate'],
-            'toDate' => (string) $filters['toDate'],
-            'pageNo' => (int) ($filters['pageNo'] ?? self::DEFAULT_PAGE_NO),
-            'pageSize' => (int) ($filters['pageSize'] ?? self::DEFAULT_PAGE_SIZE),
-        ]);
+        $parameters = $this->memberIdentityParameters->make($member, $token);
+
+        foreach (['fromDate', 'toDate'] as $field) {
+            if (isset($filters[$field]) && $filters[$field] !== '') {
+                $parameters[$field] = (string) $filters[$field];
+            }
+        }
+
+        $parameters['pageNo'] = (int) ($filters['pageNo'] ?? self::DEFAULT_PAGE_NO);
+        $parameters['pageSize'] = (int) ($filters['pageSize'] ?? self::DEFAULT_PAGE_SIZE);
 
         foreach (['agentType', 'regionCode', 'agentOrderNo'] as $field) {
             if (isset($filters[$field]) && $filters[$field] !== '') {

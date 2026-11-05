@@ -46,9 +46,7 @@ class AgentRequest extends FormRequest
     public function messages(): array
     {
         return [
-            'fromDate.required' => '收益起始日期不能为空',
             'fromDate.date_format' => '收益起始日期格式必须为 YYYY-MM-DD',
-            'toDate.required' => '收益截止日期不能为空',
             'toDate.date_format' => '收益截止日期格式必须为 YYYY-MM-DD',
             'toDate.after_or_equal' => '收益截止日期不能早于起始日期',
             'pageNo.integer' => '页码必须是整数',
@@ -85,9 +83,14 @@ class AgentRequest extends FormRequest
     /** @return array<string, mixed> 代理收益查询字段校验规则 */
     private function rulesForGetEarnings(): array
     {
+        $toDateRules = ['nullable', 'date_format:Y-m-d'];
+        if ($this->filled('fromDate')) {
+            $toDateRules[] = 'after_or_equal:fromDate';
+        }
+
         return [
-            'fromDate' => ['required', 'date_format:Y-m-d'],
-            'toDate' => ['required', 'date_format:Y-m-d', 'after_or_equal:fromDate'],
+            'fromDate' => ['nullable', 'date_format:Y-m-d'],
+            'toDate' => $toDateRules,
             'pageNo' => ['nullable', 'integer', 'min:1'],
             'pageSize' => ['nullable', 'integer', 'min:1', 'max:100'],
             'agentType' => ['nullable', Rule::enum(AgentType::class)],

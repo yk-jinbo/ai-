@@ -79,13 +79,13 @@ class AgentTest extends TestCase
             ]);
     }
 
-    public function test_omits_null_filters_and_uses_default_pagination(): void
+    public function test_omits_null_dates_and_filters_and_uses_default_pagination(): void
     {
         Http::fake([self::UPSTREAM_URL => Http::response(['code' => '0000', 'message' => '成功', 'data' => []])]);
 
         $response = $this->withToken(self::TOKEN)->postJson('/api/agent/get-earnings', [
-            'fromDate' => '2026-10-01',
-            'toDate' => '2026-10-27',
+            'fromDate' => null,
+            'toDate' => null,
             'agentType' => null,
             'regionCode' => null,
             'agentOrderNo' => null,
@@ -96,8 +96,6 @@ class AgentTest extends TestCase
             'token' => self::TOKEN,
             'mobile' => '13900001111',
             'memberType' => 'NORMAL',
-            'fromDate' => '2026-10-01',
-            'toDate' => '2026-10-27',
             'pageNo' => 1,
             'pageSize' => 20,
         ]);
