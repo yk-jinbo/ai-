@@ -4,9 +4,13 @@
 
 ## 故障原因与处理
 
-服务器原生 Git 访问 GitHub 时出现 `GnuTLS recv error (-110)` 和连接超时。改用服务器已有 `pc-management-system:prod` 镜像内的 Git，使用宿主机网络、HTTP/1.1 和 HTTPS 证书校验；不临时拉取镜像，不依赖第三方代理。
+服务器原生 Git 访问 GitHub 时出现过 `GnuTLS recv error (-110)` 和连接超时，容器 Git 也会间歇超时。探测确认部分直连的 GitHub 官方地址可用，拉取现在依次尝试一个已验证的 GitHub 官方地址、容器 Git 的普通域名路由、宿主机普通域名路由和第二个 GitHub 官方地址，再循环重试。通过 Git 的 `http.curloptResolve` 固定官方 HTTPS 主机名对应的连接地址，保留 HTTP/1.1、TLS 证书校验及 `github.com` 主机名；容器使用宿主机网络，不临时拉取镜像，不依赖第三方代理。
 
 每次拉取默认最多尝试 4 次，每次限时 40 秒，失败后分别等待 2、4、6 秒；超时后清理对应的临时容器。持续网络故障仍会导致部署失败，失败阶段及退出码会写入日志。
+
+部署以 `ecs-user` 执行。人工直接用 root 拉取会产生自动部署无法写入的 `.git/objects` 子目录；本次已修复受影响文件的属主。人工更新也应通过下面的同一部署服务触发，避免再次改变 Git 文件权限。
+
+2026-11-04 的两次推送都正常触发了 Webhook，但均在拉取阶段耗尽重试。网络随后恢复时没有新事件再次触发，因此旧镜像一直运行。新增 `ai-test-reconcile.timer`：开机后两分钟开始检查，并在上次检查结束两分钟后再次通过同一部署服务同步最新 `test` 分支。网络恢复后自动重试，漏投 Webhook 也能补上；已成功部署的版本只拉取检查，不重复构建或重启容器。
 
 原 Webhook 收到提交后就永久记录“已接收”，导致部署失败后重新投递也无法重试。现在只依赖 systemd 合并同一提交正在执行的任务，并由部署成功标记跳过已完成版本；失败提交可以重新投递。
 
@@ -17,6 +21,7 @@
 | `scripts/deployment/deploy-test.sh` | `/opt/1panel/ai-test-webhook/deploy.sh` |
 | `scripts/deployment/webhook_server.py` | `/opt/1panel/ai-test-webhook/server.py` |
 | `scripts/deployment/ai-test-deploy@.service` | `/etc/systemd/system/ai-test-deploy@.service` |
+| `scripts/deployment/ai-test-reconcile.timer` | `/etc/systemd/system/ai-test-reconcile.timer` |
 
 现有服务器配置继续使用：
 
@@ -34,6 +39,7 @@
 4. 目标版本与 `deployed.sha` 相同时跳过构建；否则构建镜像，再替换 `app` 容器。
 5. 确认容器运行，执行 `php scripts/check-runtime-assets.php`，并重试检查本地 `/api/health` 的 HTTP 状态和 `code=0`。
 6. 所有检查通过后才更新 `deployed.sha`。失败保留上次成功标记，允许同一提交重试。
+7. 定时器重复调用 `ai-test-deploy@manual.service` 补偿网络失败和漏投事件，仍经过工作区保护、串行锁及全部验证。持续网络故障时会继续留下失败日志，恢复后部署最新分支。
 
 HTTP `202 accepted` 只表示部署已触发，最终结果以状态文件和部署日志为准。构建失败不会替换运行容器；替换后的验证失败会报告失败，但不会自动回滚容器。
 
@@ -46,6 +52,7 @@ cat /var/lib/ai-test-deploy/status.json
 cat /var/lib/ai-test-deploy/deployed.sha
 tail -n 100 /var/lib/ai-test-deploy/deploy.log
 journalctl -u ai-test-webhook.service -n 30 --no-pager
+systemctl list-timers ai-test-reconcile.timer --no-pager
 ```
 
 状态文件包含 `status`、`stage`、`requested_sha`、`commit`、`exit_code`、`updated_at`。日志每条阶段消息也带请求 SHA、实际部署 SHA 和时间。常见失败阶段为 `preflight`、`fetch`、`merge`、`build`、`replace`、`verify`。
@@ -65,25 +72,31 @@ sudo systemctl start --no-block ai-test-deploy@manual.service
 ```bash
 bash -n scripts/deployment/deploy-test.sh
 python3 -c "import ast,pathlib; ast.parse(pathlib.Path('scripts/deployment/webhook_server.py').read_text())"
-systemd-analyze verify scripts/deployment/ai-test-deploy@.service
+systemd-analyze verify scripts/deployment/ai-test-deploy@.service scripts/deployment/ai-test-reconcile.timer
 
 backup_dir="/opt/1panel/ai-test-webhook/backups/$(date +%Y%m%d-%H%M%S)"
 install -d -m 0700 "$backup_dir"
 cp -p /opt/1panel/ai-test-webhook/deploy.sh "$backup_dir/deploy.sh"
 cp -p /opt/1panel/ai-test-webhook/server.py "$backup_dir/server.py"
 cp -p /etc/systemd/system/ai-test-deploy@.service "$backup_dir/ai-test-deploy@.service"
+if [ -f /etc/systemd/system/ai-test-reconcile.timer ]; then
+    cp -p /etc/systemd/system/ai-test-reconcile.timer "$backup_dir/ai-test-reconcile.timer"
+fi
 
 install -m 0755 scripts/deployment/deploy-test.sh /opt/1panel/ai-test-webhook/deploy.sh.new
 mv /opt/1panel/ai-test-webhook/deploy.sh.new /opt/1panel/ai-test-webhook/deploy.sh
 install -m 0755 scripts/deployment/webhook_server.py /opt/1panel/ai-test-webhook/server.py.new
 mv /opt/1panel/ai-test-webhook/server.py.new /opt/1panel/ai-test-webhook/server.py
 install -m 0644 scripts/deployment/ai-test-deploy@.service /etc/systemd/system/ai-test-deploy@.service
+install -m 0644 scripts/deployment/ai-test-reconcile.timer /etc/systemd/system/ai-test-reconcile.timer
 systemctl daemon-reload
 systemctl restart ai-test-webhook.service
+systemctl enable --now ai-test-reconcile.timer
 systemctl is-active ai-test-webhook.service
+systemctl is-active ai-test-reconcile.timer
 ```
 
-若需回退运维脚本，用对应备份目录的三个文件恢复上表中的安装位置，再执行 `systemctl daemon-reload` 和 `systemctl restart ai-test-webhook.service`。这只回退部署工具，不回退应用版本。
+若需回退运维脚本，用对应备份目录的文件恢复上表中的安装位置，再执行 `systemctl daemon-reload` 和 `systemctl restart ai-test-webhook.service`。首次安装定时器后的回退先执行 `systemctl disable --now ai-test-reconcile.timer`；已有定时器则恢复备份后重新启用。这只回退部署工具，不回退应用版本。
 
 脚本支持 `AI_TEST_FETCH_ATTEMPTS`、`AI_TEST_FETCH_TIMEOUT`、`AI_TEST_RETRY_DELAY`；路径和镜像配置见脚本顶部的 `AI_TEST_*` 默认值。运维调整使用 `ai-test-deploy@.service` 的 systemd drop-in 中的 `Environment=`，不写入 Laravel 的 `.env`。部署任务总时限为 10 分钟，调大拉取重试配置时需一并评估。
 
@@ -96,4 +109,4 @@ bash -n scripts/deployment/deploy-test.sh
 PYTHONDONTWRITEBYTECODE=1 python3 -B -m unittest discover -s tests/Deployment -p 'test_*.py' -v
 ```
 
-覆盖签名校验、失败后重新投递、重复提交、网络重试、超时清理、构建失败、健康检查失败和工作区保护。Windows 下部署脚本测试会跳过，完整验证需要 Linux。
+覆盖签名校验、失败后重新投递、重复提交、GitHub 官方 HTTPS 地址固定及 TLS 校验、容器与宿主机 Git 重试、超时清理、定期重试在网络恢复后完成部署且随后跳过重复构建、构建失败、健康检查失败和工作区保护。Windows 下部署脚本测试会跳过，完整验证需要 Linux。

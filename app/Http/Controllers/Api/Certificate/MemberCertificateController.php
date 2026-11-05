@@ -13,7 +13,7 @@ use Spatie\RouteAttributes\Attributes\Middleware;
 use Spatie\RouteAttributes\Attributes\Prefix;
 
 #[Middleware(AuthenticateMemberToken::class)]
-#[Prefix('api-iam/api/v1/member/certificate')]
+#[Prefix('api/v1/member/certificate')]
 class MemberCertificateController extends Controller
 {
     public function __construct(private CertificateService $certificateService) {}
