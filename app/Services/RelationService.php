@@ -132,7 +132,7 @@ class RelationService
 
         }
 
-        return $this->paginate($items, 22, $page, $pagesize);
+        return $this->paginate($items, (int) ($data['total'] ?? 0), $page, $pagesize);
     }
 
     /**
@@ -183,7 +183,7 @@ class RelationService
 
         }
 
-        return $this->paginate($items, 22, $page, $pagesize);
+        return $this->paginate($items, (int) ($data['total'] ?? 0), $page, $pagesize);
     }
 
     /**
@@ -294,7 +294,14 @@ class RelationService
      *
      * @return array<string, mixed> 兑换额记录数据
      */
-    public function getExchangeStatisticsList(string $startDate, string $endDate, array $user, string $token): array
+    public function getExchangeStatisticsList(
+        string $startDate,
+        string $endDate,
+        int $page,
+        int $pagesize,
+        array $user,
+        string $token,
+    ): array
     {
 //        $todayDay = date('Y-m-d');
 //        $todayDay = $endDate = '2026-10-27';
@@ -306,8 +313,8 @@ class RelationService
                 'asOfDate' => $endDate,
                 'fromDate' => $startDate,
                 'toDate' => $endDate,
-                'pageNo' => 1,
-                'pageSize' => 30,
+                'pageNo' => $page,
+                'pageSize' => $pagesize,
             ]),
             isSuccessful: static fn (Response $response): bool => $response->successful(),
             service: 'relations_network_flows',
@@ -342,7 +349,7 @@ class RelationService
             $previousAmount = $exchangeAmount;
         }
 
-        return $items;
+        return $this->paginate($items, (int) ($data['total'] ?? 0), $page, $pagesize);
     }
 
     /**

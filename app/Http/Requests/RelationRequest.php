@@ -30,10 +30,10 @@ class RelationRequest extends FormRequest
     {
         return match ($this->controllerAction()) {
             'fansList', 'teamList' => $this->paginationRules(),
-            'exchangeStatisticsList' => [
+            'exchangeStatisticsList' => array_merge($this->paginationRules(), [
                 'start_date' => ['required', 'date_format:Y-m-d'],
                 'end_date' => ['required', 'date_format:Y-m-d', 'after_or_equal:start_date'],
-            ],
+            ]),
             'teamStatistics', 'exchangeStatistics', 'fansStatistics' => [],
             default => throw new LogicException('RelationRequest 未配置当前 Controller 动作的校验规则'),
         };

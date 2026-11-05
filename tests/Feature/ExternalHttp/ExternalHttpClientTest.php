@@ -182,14 +182,15 @@ class ExternalHttpClientTest extends TestCase
     public function test_relation_team_list_uses_upstream_details(): void
     {
         config()->set('services.external_http.gateways.default', 'http://192.168.11.202:8082');
-        $upstreamData = ['records' => [['mobile' => '13800000001']], 'total' => 1];
+        $upstreamData = ['items' => [['member' => ['mobile' => '13800000001', 'memberName' => 'Team']]], 'total' => 17];
         Http::fake(['*' => Http::response(['code' => 'OK', 'data' => $upstreamData])]);
 
         $result = $this->app->make(RelationService::class)->getTeamList(1, 10, [
             'mobile' => '13812345678', 'member_type' => 'PREMIUM',
         ], 'test-token');
 
-        $this->assertSame($upstreamData, $result);
+        $this->assertSame(17, $result['total']);
+        $this->assertSame('*******0001', $result['data'][0]['mobile']);
         Http::assertSent(function (ClientRequest $request): bool {
             return $request->method() === 'POST'
                 && $request->url() === 'http://192.168.11.202:8082/api/v1/computing/query/relations/details'
@@ -208,7 +209,7 @@ class ExternalHttpClientTest extends TestCase
     public function test_relation_exchange_statistics_list_uses_network_flows(): void
     {
         config()->set('services.external_http.gateways.default', 'http://192.168.11.202:8082');
-        $upstreamData = ['items' => [
+        $upstreamData = ['total' => 23, 'items' => [
             ['bizDate' => '2026-08-03', 'exchangeAmount' => '120.00', 'changeFromPreviousDay' => '999.00'],
             ['bizDate' => '2026-08-01', 'exchangeAmount' => '100.00'],
             ['bizDate' => '2026-08-02', 'exchangeAmount' => '80.00'],
@@ -216,9 +217,13 @@ class ExternalHttpClientTest extends TestCase
         Http::fake(['*' => Http::response(['code' => 'OK', 'data' => $upstreamData])]);
 
         $result = $this->app->make(RelationService::class)->getExchangeStatisticsList(
-            '2026-08-01', '2026-08-03', ['mobile' => '13812345678', 'member_type' => 'NORMAL'], 'test-token',
+            '2026-08-01', '2026-08-03', 2, 5,
+            ['mobile' => '13812345678', 'member_type' => 'NORMAL'], 'test-token',
         );
 
+        $this->assertSame(23, $result['total']);
+        $this->assertSame(2, $result['current_page']);
+        $this->assertSame(5, $result['pagesize']);
         $this->assertSame([
             [
                 'date' => '2026-08-01',
@@ -238,7 +243,7 @@ class ExternalHttpClientTest extends TestCase
                 'difference_from_previous_day' => '40.00',
                 'difference_previous_day_type' => true,
             ],
-        ], $result);
+        ], $result['data']);
         Http::assertSent(function (ClientRequest $request): bool {
             return $request->method() === 'POST'
                 && $request->url() === 'http://192.168.11.202:8082/api/v1/computing/query/relations/network/flows'
@@ -246,11 +251,11 @@ class ExternalHttpClientTest extends TestCase
                 && $request['mobile'] === '13812345678'
                 && $request['memberType'] === 'NORMAL'
                 && $request['token'] === 'test-token'
-                && $request['asOfDate'] === date('Y-m-d')
+                && $request['asOfDate'] === '2026-08-03'
                 && $request['fromDate'] === '2026-08-01'
                 && $request['toDate'] === '2026-08-03'
-                && $request['pageNo'] === 1
-                && $request['pageSize'] === 20;
+                && $request['pageNo'] === 2
+                && $request['pageSize'] === 5;
         });
     }
 
@@ -277,6 +282,7 @@ class ExternalHttpClientTest extends TestCase
     {
         config()->set('services.external_http.gateways.default', 'http://192.168.11.202:8082');
         Http::fake(['*' => Http::response(['code' => 'OK', 'data' => [
+            'total' => 19,
             'items' => [[
                 'member' => ['mobile' => '13800000001', 'memberName' => '张三', 'memberLevel' => 'VIP'],
                 'userDailyExchangeAmount' => '20.00',
@@ -291,6 +297,7 @@ class ExternalHttpClientTest extends TestCase
         $this->assertSame('张三', $result['data'][0]['fan_name']);
         $this->assertSame('张', $result['data'][0]['fan_name_abbr']);
         $this->assertSame('*******0001', $result['data'][0]['mobile']);
+        $this->assertSame(19, $result['total']);
     }
 
     /** 验证关系列表返回的手机号统一隐藏中间四位。 */
@@ -308,10 +315,10 @@ class ExternalHttpClientTest extends TestCase
         $user = ['mobile' => '15012345678', 'member_type' => 'NORMAL'];
 
         $team = $service->getTeamList(1, 10, $user, 'test-token');
-        $flows = $service->getExchangeStatisticsList('2026-08-01', '2026-08-01', $user, 'test-token');
+        $flows = $service->getExchangeStatisticsList('2026-08-01', '2026-08-01', 1, 10, $user, 'test-token');
 
         $this->assertSame('*******5678', $team['data'][0]['mobile']);
-        $this->assertSame('*******5678', $flows[0]['mobile']);
+        $this->assertSame('*******5678', $flows['data'][0]['mobile']);
     }
 
     /** 验证关系接口把登录 token 去掉 Bearer 前缀后作为 JSON 字段传给上游。 */

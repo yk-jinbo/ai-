@@ -108,7 +108,14 @@ class RelationController extends Controller
         [$user, $token] = $this->authContext($request, $authTokenService);
 
         return ResponseHelper::success(
-            $this->relationService->getExchangeStatisticsList($data['start_date'], $data['end_date'], $user, $token),
+            $this->relationService->getExchangeStatisticsList(
+                $data['start_date'],
+                $data['end_date'],
+                (int) ($data['page'] ?? 1),
+                (int) ($data['pagesize'] ?? 10),
+                $user,
+                $token,
+            ),
             '团队兑换额记录获取成功',
         );
     }
