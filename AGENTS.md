@@ -1086,3 +1086,10 @@ docker compose -f docker-compose.image.yml exec -T app php artisan make:controll
 ### Domain docs
 
 采用 single-context 布局：根目录 `GLOSSARY.md` 和 `docs/adr/`，均按需创建；读取约定见 `docs/agents/domain.md`。
+
+### Ponytail
+
+项目级技能位于 `.agents/skills/ponytail/`，用于在满足已确认需求的前提下复用现有实现、减少不必要代码。
+
+- 精简建议必须遵守本文的分层、Repository 查询格式、方法职责与长度、中文 PHPDoc、校验、安全、测试覆盖和验证要求。
+- 使用 `grilling` 或 `grill-with-docs` 澄清需求时，继续遵循其提问与确认流程；Ponytail 不得自行缩减已确认范围，或省略必要的规格、词汇表与 ADR 更新。
