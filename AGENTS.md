@@ -1074,3 +1074,15 @@ docker compose -f docker-compose.image.yml exec -T app php artisan make:controll
 - 输出用户数据前注意 `Hidden`/`hidden` 隐藏敏感字段（密码、remember_token）。
 - 修改数据库结构或数据须由开发者在数据库侧明确执行，AI 不得擅自执行破坏性命令。
 - 排序字段、排序方向、分页大小必须白名单与限界，不得直接把请求参数传给 `orderBy()`。
+
+---
+
+## Agent skills
+
+### Issue tracker
+
+本项目的任务与规格使用 GitHub Issues（`yk-jinbo/ai-`），操作约定见 `docs/agents/issue-tracker.md`。
+
+### Domain docs
+
+采用 single-context 布局：根目录 `GLOSSARY.md` 和 `docs/adr/`，均按需创建；读取约定见 `docs/agents/domain.md`。
