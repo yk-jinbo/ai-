@@ -115,7 +115,7 @@ class RelationService
         $items = [];
         foreach ($data['items'] ?? [] as $item) {
             $items[] = [
-                'mobile' => $item['member']['mobile'] ?? '',
+                'mobile' => $this->maskMobile($item['member']['mobile'] ?? ''),
 //                'team_member_id' => 74,
                 'fan_name' => $item['member']['memberName'] ?? '',
                 'level_title' => $item['member']['memberLevel'] ?? '',
@@ -168,7 +168,7 @@ class RelationService
         $items = [];
         foreach ($data['items'] as $item) {
             $items[] = [
-                'mobile' => $item['member']['mobile'] ?? '',
+                'mobile' => $this->maskMobile($item['member']['mobile'] ?? ''),
 //                'team_member_id' => 74,
                 'member_name' => $item['member']['memberName'] ?? '',
 //                'member_avatar' => '111.jpg',
@@ -321,10 +321,14 @@ class RelationService
 
         $items = [];
         foreach ($data['items'] ?? [] as $item) {
-            $items[] = [
+            $mappedItem = [
                 'date' => $item['bizDate'] ?? '',
                 'exchange_amount' => $item['exchangeAmount'] ?? '0.00',
             ];
+            if (array_key_exists('mobile', $item)) {
+                $mappedItem['mobile'] = $this->maskMobile($item['mobile']);
+            }
+            $items[] = $mappedItem;
         }
 
         usort($items, static fn (array $left, array $right): int => strcmp($left['date'], $right['date']));
@@ -377,5 +381,16 @@ class RelationService
             'mobile' => $mobile,
             'memberType' => $memberType,
         ];
+    }
+
+    // 手机号脱敏 只保留后四位
+    private function maskMobile(mixed $mobile): string
+    {
+        $mobile = (string) $mobile;
+        if (strlen($mobile) < 7) {
+            return $mobile;
+        }
+
+        return str_repeat('*', strlen($mobile) - 4).substr($mobile, -4);
     }
 }
