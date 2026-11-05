@@ -294,6 +294,41 @@ class AssessmentTest extends TestCase
     }
 
     /**
+     * 验证代理兑换查询允许省略日期范围且不会向第三方发送空日期
+     *
+     * @return void
+     */
+    public function test_assessment_info_omits_null_agent_dates(): void
+    {
+        $url = 'https://assets.example.test/api/v1/computing/query/agents/exchanges';
+        config()->set('services.assessment_info.urls.AGENT', $url);
+        Http::fake([
+            $url => Http::response([
+                'code' => '0000',
+                'message' => '成功',
+                'data' => ['items' => []],
+            ]),
+        ]);
+
+        $response = $this->withToken(self::TOKEN)->postJson('/api/assessment/assessment-info', [
+            'businessType' => 'AGENT',
+            'asOfDate' => '2026-11-05',
+            'fromDate' => null,
+            'toDate' => null,
+        ]);
+
+        $response->assertOk()->assertJsonPath('data.items', []);
+        Http::assertSent(fn (Request $request): bool => $request->url() === $url
+            && $request->data() === [
+                'pageNo' => 1,
+                'pageSize' => 20,
+                'token' => self::TOKEN,
+                'mobile' => '13900001111',
+                'memberType' => 'NORMAL',
+            ]);
+    }
+
+    /**
      * 验证未知业务类型不会调用第三方接口
      *
      * @return void

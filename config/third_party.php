@@ -21,7 +21,7 @@ $assessmentInfoUrls = [
     //会员考核
     'MEMBER_ASSESS' => $assessmentInfoBaseUrl.'/api/v1/computing/query/assessments/member',
     //会员激励考核
-    'MEMBER_INCENTIVE' => $assessmentInfoBaseUrl.'/api/v1/computing/query/trades/direct/summary',
+    'MEMBER_INCENTIVE' => $assessmentInfoBaseUrl.'/api/v1/computing/query/assessments/incentive',
     //分公司考核
     'BRANCH_COMPANY' => $assessmentInfoBaseUrl.'/api/v1/computing/query/assessments/branch-company',
     //运营中心考核
@@ -37,6 +37,7 @@ $assessmentInfoUrls = [
     //运营中心孵化
     'INCUBATION' => $assessmentInfoBaseUrl.'/api/v1/computing/query/assessments/incubation',
 ];
+
 
 return [
     'member_auth' => [

@@ -57,9 +57,7 @@ class AssetRequest extends FormRequest
     public function messages(): array
     {
         return [
-            'fromDate.required' => '发生日期起始日不能为空',
             'fromDate.date_format' => '发生日期起始日格式必须为 YYYY-MM-DD',
-            'toDate.required' => '发生日期截止日不能为空',
             'toDate.date_format' => '发生日期截止日格式必须为 YYYY-MM-DD',
             'toDate.after_or_equal' => '发生日期截止日不能早于起始日',
             'pageNo.integer' => '页码必须是整数',
@@ -112,9 +110,14 @@ class AssetRequest extends FormRequest
      */
     private function rulesForRecords(): array
     {
+        $toDateRules = ['nullable', 'date_format:Y-m-d'];
+        if ($this->filled('fromDate')) {
+            $toDateRules[] = 'after_or_equal:fromDate';
+        }
+
         return [
-            'fromDate' => ['required', 'date_format:Y-m-d'],
-            'toDate' => ['required', 'date_format:Y-m-d', 'after_or_equal:fromDate'],
+            'fromDate' => ['nullable', 'date_format:Y-m-d'],
+            'toDate' => $toDateRules,
             'pageNo' => ['nullable', 'integer', 'min:1'],
             'pageSize' => ['nullable', 'integer', 'min:1', 'max:100'],
             'businessType' => ['nullable', Rule::enum(AssetBusinessType::class)],
@@ -130,13 +133,18 @@ class AssetRequest extends FormRequest
      */
     private function rulesForNetInflowRecords(): array
     {
+        $toDateRules = ['nullable', 'date_format:Y-m-d'];
+        if ($this->filled('fromDate')) {
+            $toDateRules[] = 'after_or_equal:fromDate';
+        }
+
         return [
             'asOfDate' => ['nullable', 'date_format:Y-m-d'],
             'assessmentType' => ['required', Rule::enum(AssetNetInflowAssessmentType::class)],
             'orgId' => ['required', 'integer', 'min:1'],
             'periodType' => ['required', Rule::enum(AssetNetInflowPeriodType::class)],
-            'fromDate' => ['required', 'date_format:Y-m-d'],
-            'toDate' => ['required', 'date_format:Y-m-d', 'after_or_equal:fromDate'],
+            'fromDate' => ['nullable', 'date_format:Y-m-d'],
+            'toDate' => $toDateRules,
             'pageNo' => ['nullable', 'integer', 'min:1'],
             'pageSize' => ['nullable', 'integer', 'min:1', 'max:100'],
         ];
