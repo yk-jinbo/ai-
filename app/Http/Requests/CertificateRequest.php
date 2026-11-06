@@ -18,6 +18,7 @@ class CertificateRequest extends FormRequest
     public function rules(): array
     {
         return match ($this->controllerAction()) {
+            'profile' => [],
             'list' => [],
             'listByType' => [
                 'certType' => ['required', 'string'],

@@ -23,6 +23,11 @@ class CertificateService
         return $this->certificateClient->memberCertificatesByType($certType, $token);
     }
 
+    public function memberProfile(string $token): CertificateProxyResult
+    {
+        return $this->certificateClient->memberProfile($token);
+    }
+
     /**
      * 先查询当前会员资料，再以 data.id 作为 memberId 查询 PER 权证。
      * 资料查询失败或 ID 无效时终止调用，不使用前端参数或本地缓存 ID 回退。
