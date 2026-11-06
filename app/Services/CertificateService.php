@@ -42,7 +42,7 @@ class CertificateService
             return $profile;
         }
 
-        $id = is_array($profile->data) ? ($profile->data['id'] ?? null) : null;
+        $id = $profile->data instanceof \stdClass ? ($profile->data->id ?? null) : null;
         $memberId = is_int($id) || is_string($id)
             ? filter_var($id, FILTER_VALIDATE_INT, ['options' => ['min_range' => 1]])
             : false;

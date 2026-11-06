@@ -83,8 +83,8 @@ class HttpCertificateClient implements CertificateClient
 
     private function parse(Response $response): CertificateProxyResult
     {
-        $body = $response->json();
-        if (! is_array($body)) {
+        $body = json_decode($response->body());
+        if (! $body instanceof \stdClass) {
             return new CertificateProxyResult(
                 data: null,
                 message: '数证服务响应格式异常',
@@ -93,6 +93,7 @@ class HttpCertificateClient implements CertificateClient
             );
         }
 
+        $body = get_object_vars($body);
         $upstreamCode = is_scalar($body['code'] ?? null)
             ? trim((string) $body['code'])
             : null;
