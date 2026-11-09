@@ -350,6 +350,8 @@ class RelationService
             $previousAmount = $exchangeAmount;
         }
 
+        usort($items['list'], static fn (array $left, array $right): int => strcmp($right['date'], $left['date']));
+
         return $this->paginate($items, (int) ($data['total'] ?? 0), $page, $pagesize);
     }
 
