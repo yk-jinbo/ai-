@@ -209,41 +209,34 @@ class ExternalHttpClientTest extends TestCase
     public function test_relation_exchange_statistics_list_uses_network_flows(): void
     {
         config()->set('services.external_http.gateways.default', 'http://192.168.11.202:8082');
-        $upstreamData = ['total' => 23, 'items' => [
-            ['bizDate' => '2026-08-03', 'exchangeAmount' => '120.00', 'changeFromPreviousDay' => '999.00'],
-            ['bizDate' => '2026-08-01', 'exchangeAmount' => '100.00'],
-            ['bizDate' => '2026-08-02', 'exchangeAmount' => '80.00'],
+        $upstreamData = ['total' => 9, 'items' => [
+            ['bizDate' => '2026-11-02', 'exchangeAmount' => '7014.00000000'],
+            ['bizDate' => '2026-11-03', 'exchangeAmount' => '7611.00000000'],
         ]];
         Http::fake(['*' => Http::response(['code' => 'OK', 'data' => $upstreamData])]);
 
         $result = $this->app->make(RelationService::class)->getExchangeStatisticsList(
-            '2026-08-01', '2026-08-03', 2, 5,
+            '2026-11-02', '2026-11-03', 1, 2,
             ['mobile' => '13812345678', 'member_type' => 'NORMAL'], 'test-token',
         );
 
-        $this->assertSame(23, $result['total']);
-        $this->assertSame(2, $result['current_page']);
-        $this->assertSame(5, $result['pagesize']);
+        $this->assertSame(9, $result['total']);
+        $this->assertSame(1, $result['current_page']);
+        $this->assertSame(2, $result['pagesize']);
         $this->assertSame([
             [
-                'date' => '2026-08-01',
-                'exchange_amount' => '100.00',
+                'date' => '2026-11-03',
+                'exchange_amount' => '7611.00000000',
+                'difference_from_previous_day' => '597.00',
+                'difference_previous_day_type' => true,
+            ],
+            [
+                'date' => '2026-11-02',
+                'exchange_amount' => '7014.00000000',
                 'difference_from_previous_day' => '0.00',
                 'difference_previous_day_type' => true,
             ],
-            [
-                'date' => '2026-08-02',
-                'exchange_amount' => '80.00',
-                'difference_from_previous_day' => '20.00',
-                'difference_previous_day_type' => false,
-            ],
-            [
-                'date' => '2026-08-03',
-                'exchange_amount' => '120.00',
-                'difference_from_previous_day' => '40.00',
-                'difference_previous_day_type' => true,
-            ],
-        ], $result['data']);
+        ], $result['data']['list']);
         Http::assertSent(function (ClientRequest $request): bool {
             return $request->method() === 'POST'
                 && $request->url() === 'http://192.168.11.202:8082/api/v1/computing/query/relations/network/flows'
@@ -251,11 +244,11 @@ class ExternalHttpClientTest extends TestCase
                 && $request['mobile'] === '13812345678'
                 && $request['memberType'] === 'NORMAL'
                 && $request['token'] === 'test-token'
-                && $request['asOfDate'] === '2026-08-03'
-                && $request['fromDate'] === '2026-08-01'
-                && $request['toDate'] === '2026-08-03'
-                && $request['pageNo'] === 2
-                && $request['pageSize'] === 5;
+                && $request['asOfDate'] === '2026-11-03'
+                && $request['fromDate'] === '2026-11-02'
+                && $request['toDate'] === '2026-11-03'
+                && $request['pageNo'] === 1
+                && $request['pageSize'] === 2;
         });
     }
 

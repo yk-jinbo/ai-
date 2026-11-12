@@ -244,7 +244,9 @@ class AssetService
     private function normalizeRecordData(array $data): Collection
     {
         $hasLists = is_array($data['balances'] ?? null) && is_array($data['items'] ?? null);
-        $hasPagination = is_numeric($data['total'] ?? null)
+        // 上游空结果可能返回 total=null；items 为空时其语义等同于总数 0。
+        $total = $data['total'] ?? null;
+        $hasPagination = (($total === null && $data['items'] === []) || is_numeric($total))
             && is_numeric($data['pageNo'] ?? null)
             && is_numeric($data['pageSize'] ?? null);
         ResponseHelper::errorIf(
@@ -259,7 +261,7 @@ class AssetService
         return collect([
             'balances' => $this->normalizeBalances($data['balances']),
             'items' => $this->normalizeRecordItems($data['items']),
-            'total' => (int) $data['total'],
+            'total' => (int) ($data['total'] ?? 0),
             'pageNo' => (int) $data['pageNo'],
             'pageSize' => (int) $data['pageSize'],
         ]);
