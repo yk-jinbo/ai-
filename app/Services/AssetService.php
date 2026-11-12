@@ -15,6 +15,8 @@ class AssetService
 {
     private const UPSTREAM_SUCCESS_CODE = '0000';
 
+    private const LOCAL_RESPONSE_ERROR_PREFIX = '本地校验资产服务响应失败：';
+
     private const DEFAULT_PAGE_NO = 1;
 
     private const DEFAULT_PAGE_SIZE = 20;
@@ -55,7 +57,10 @@ class AssetService
         );
 
         $responseData = $this->validatedResponseData($response);
-        ResponseHelper::errorIf(! is_array($responseData['assets'] ?? null), '资产服务响应格式异常');
+        ResponseHelper::errorIf(
+            ! is_array($responseData['assets'] ?? null),
+            self::LOCAL_RESPONSE_ERROR_PREFIX.'assets 必须是数组',
+        );
 
         return collect([
             'assets' => $this->normalizeAssets($responseData['assets']),
@@ -160,7 +165,6 @@ class AssetService
      * @param  string  $token  当前请求中的上游会员令牌
      * @param  array<string, mixed>  $filters  已校验的资产流水筛选条件
      * @return array<string, int|string> 第三方资产流水查询参数
-     *
      */
     private function recordsUpstreamParameters(array $member, string $token, array $filters): array
     {
@@ -221,7 +225,10 @@ class AssetService
         );
 
         $data = is_array($body) ? ($body['data'] ?? null) : null;
-        ResponseHelper::errorIf(! is_array($data), '资产服务响应格式异常');
+        ResponseHelper::errorIf(
+            ! is_array($data),
+            self::LOCAL_RESPONSE_ERROR_PREFIX.'成功响应的 data 必须是对象',
+        );
 
         return $data;
     }
@@ -240,7 +247,14 @@ class AssetService
         $hasPagination = is_numeric($data['total'] ?? null)
             && is_numeric($data['pageNo'] ?? null)
             && is_numeric($data['pageSize'] ?? null);
-        ResponseHelper::errorIf(! $hasLists || ! $hasPagination, '资产服务响应格式异常');
+        ResponseHelper::errorIf(
+            ! $hasLists,
+            self::LOCAL_RESPONSE_ERROR_PREFIX.'流水响应必须包含 balances 和 items 数组',
+        );
+        ResponseHelper::errorIf(
+            ! $hasPagination,
+            self::LOCAL_RESPONSE_ERROR_PREFIX.'流水响应的 total、pageNo、pageSize 必须是数字',
+        );
 
         return collect([
             'balances' => $this->normalizeBalances($data['balances']),
@@ -264,7 +278,10 @@ class AssetService
         $normalizedBalances = [];
 
         foreach ($balances as $balance) {
-            ResponseHelper::errorIf(! is_array($balance), '资产服务响应格式异常');
+            ResponseHelper::errorIf(
+                ! is_array($balance),
+                self::LOCAL_RESPONSE_ERROR_PREFIX.'balances 中的记录必须是对象',
+            );
             $normalizedBalances[] = [
                 'assetType' => $this->requiredString($balance, 'assetType'),
                 'balance' => $this->nullableString($balance, 'balance'),
@@ -287,7 +304,10 @@ class AssetService
         $normalizedItems = [];
 
         foreach ($items as $item) {
-            ResponseHelper::errorIf(! is_array($item), '资产服务响应格式异常');
+            ResponseHelper::errorIf(
+                ! is_array($item),
+                self::LOCAL_RESPONSE_ERROR_PREFIX.'items 中的记录必须是对象',
+            );
             $normalizedItems[] = [
                 'flowId' => $this->requiredString($item, 'flowId'),
                 'businessType' => $this->requiredString($item, 'businessType'),
@@ -295,7 +315,8 @@ class AssetService
                 'direction' => $this->requiredString($item, 'direction'),
                 'changeQuantity' => $this->requiredString($item, 'changeQuantity'),
                 'balanceAfter' => $this->nullableString($item, 'balanceAfter'),
-                'occurredAt' => $this->requiredString($item, 'occurredAt'),
+                // 上游部分流水只有发生日期，发生时间为空时保留 null。
+                'occurredAt' => $this->nullableString($item, 'occurredAt'),
                 'occurredDate' => $this->requiredString($item, 'occurredDate'),
                 'assessmentPeriodType' => $this->nullableString($item, 'assessmentPeriodType'),
                 'periodStart' => $this->nullableString($item, 'periodStart'),
@@ -318,7 +339,10 @@ class AssetService
      */
     private function requiredString(array $data, string $field): string
     {
-        ResponseHelper::errorIf(! is_scalar($data[$field] ?? null), '资产服务响应格式异常');
+        ResponseHelper::errorIf(
+            ! is_scalar($data[$field] ?? null),
+            self::LOCAL_RESPONSE_ERROR_PREFIX.$field.' 必须是标量',
+        );
 
         return (string) $data[$field];
     }
@@ -335,7 +359,10 @@ class AssetService
     private function nullableString(array $data, string $field): ?string
     {
         $value = $data[$field] ?? null;
-        ResponseHelper::errorIf($value !== null && ! is_scalar($value), '资产服务响应格式异常');
+        ResponseHelper::errorIf(
+            $value !== null && ! is_scalar($value),
+            self::LOCAL_RESPONSE_ERROR_PREFIX.$field.' 必须是标量或 null',
+        );
 
         return $value === null ? null : (string) $value;
     }
@@ -361,7 +388,10 @@ class AssetService
                 && ($asset['obtainedQuantity'] === null || is_scalar($asset['obtainedQuantity']))
                 && array_key_exists('visible', $asset)
                 && ($asset['visible'] === null || is_bool($asset['visible']));
-            ResponseHelper::errorIf(! $isValid, '资产服务响应格式异常');
+            ResponseHelper::errorIf(
+                ! $isValid,
+                self::LOCAL_RESPONSE_ERROR_PREFIX.'assets 中的记录字段不完整或类型错误',
+            );
 
             if ($asset['visible'] === false) {
                 continue;

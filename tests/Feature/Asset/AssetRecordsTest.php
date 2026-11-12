@@ -48,8 +48,6 @@ class AssetRecordsTest extends TestCase
 
     /**
      * 验证接口组合 Token 用户信息和前端参数，并返回标准化流水数据
-     *
-     * @return void
      */
     public function test_returns_asset_records_from_upstream(): void
     {
@@ -78,9 +76,62 @@ class AssetRecordsTest extends TestCase
     }
 
     /**
+     * 验证上游流水的发生时间为空时仍返回整页记录，并保留发生日期和空值
+     */
+    public function test_returns_records_with_null_occurred_at(): void
+    {
+        $upstream = $this->successfulUpstreamResponse();
+        $upstream['data']['items'][1]['occurredAt'] = null;
+        $upstream['data']['pageSize'] = 10;
+        Http::fake([self::UPSTREAM_URL => Http::response($upstream)]);
+
+        $response = $this->withToken(self::TOKEN)->postJson('/api/assets/records', [
+            'pageNo' => 1,
+            'pageSize' => 10,
+            'businessType' => '',
+            'fromDate' => '',
+            'toDate' => '',
+            'assessmentPeriodType' => '',
+            'assetType' => 'GCP',
+        ]);
+
+        $response->assertStatus(200);
+        $response->assertExactJson([
+            'code' => ApiCode::SUCCESS->value,
+            'message' => '资产流水查询成功',
+            'data' => $upstream['data'],
+        ]);
+        Http::assertSent(fn (Request $request): bool => $request->data() === [
+            'token' => self::TOKEN,
+            'mobile' => '13800000002',
+            'memberType' => 'NORMAL',
+            'pageNo' => 1,
+            'pageSize' => 10,
+            'assetType' => 'GCP',
+        ]);
+    }
+
+    /**
+     * 验证可空的发生时间仍拒绝数组等异常类型，避免输出错误结构
+     */
+    public function test_rejects_non_scalar_occurred_at(): void
+    {
+        $upstream = $this->successfulUpstreamResponse();
+        $upstream['data']['items'][1]['occurredAt'] = ['invalid'];
+        Http::fake([self::UPSTREAM_URL => Http::response($upstream)]);
+
+        $response = $this->withToken(self::TOKEN)->postJson('/api/assets/records');
+
+        $response->assertStatus(400);
+        $response->assertExactJson([
+            'code' => ApiCode::ERROR->value,
+            'message' => '本地校验资产服务响应失败：occurredAt 必须是标量或 null',
+            'data' => null,
+        ]);
+    }
+
+    /**
      * 验证截止日期早于起始日期时返回统一 422 响应
-     *
-     * @return void
      */
     public function test_rejects_reversed_date_range(): void
     {
@@ -100,8 +151,6 @@ class AssetRecordsTest extends TestCase
 
     /**
      * 验证非法筛选类型和超限分页参数被 FormRequest 拒绝
-     *
-     * @return void
      */
     public function test_rejects_invalid_filter_values(): void
     {
@@ -126,8 +175,6 @@ class AssetRecordsTest extends TestCase
 
     /**
      * 验证日期范围省略时不向第三方发送日期字段
-     *
-     * @return void
      */
     public function test_allows_request_without_date_range(): void
     {
@@ -152,8 +199,6 @@ class AssetRecordsTest extends TestCase
 
     /**
      * 验证未携带 Token 时返回统一 401 响应
-     *
-     * @return void
      */
     public function test_rejects_request_without_token(): void
     {
@@ -168,8 +213,6 @@ class AssetRecordsTest extends TestCase
 
     /**
      * 验证第三方服务异常转换为本项目统一业务错误
-     *
-     * @return void
      */
     public function test_returns_business_error_when_upstream_fails(): void
     {
@@ -189,6 +232,57 @@ class AssetRecordsTest extends TestCase
         $response->assertExactJson([
             'code' => ApiCode::ERROR->value,
             'message' => '资产服务异常',
+            'data' => null,
+        ]);
+    }
+
+    /**
+     * 验证上游业务错误消息会原样透传，不与本地响应格式校验混淆
+     */
+    public function test_preserves_upstream_format_error_message(): void
+    {
+        Http::fake([
+            self::UPSTREAM_URL => Http::response([
+                'code' => '0002',
+                'message' => '资产服务响应格式异常',
+                'data' => null,
+            ]),
+        ]);
+
+        $response = $this->withToken(self::TOKEN)->postJson('/api/assets/records');
+
+        $response->assertStatus(400);
+        $response->assertExactJson([
+            'code' => ApiCode::ERROR->value,
+            'message' => '资产服务响应格式异常',
+            'data' => null,
+        ]);
+    }
+
+    /**
+     * 验证上游成功但缺少流水列表时返回明确的本地校验错误
+     */
+    public function test_reports_local_response_format_error_for_missing_record_lists(): void
+    {
+        Http::fake([
+            self::UPSTREAM_URL => Http::response([
+                'code' => '0000',
+                'message' => '成功',
+                'data' => [
+                    'total' => 0,
+                    'pageNo' => 1,
+                    'pageSize' => 20,
+                    'items' => [],
+                ],
+            ]),
+        ]);
+
+        $response = $this->withToken(self::TOKEN)->postJson('/api/assets/records');
+
+        $response->assertStatus(400);
+        $response->assertExactJson([
+            'code' => ApiCode::ERROR->value,
+            'message' => '本地校验资产服务响应失败：流水响应必须包含 balances 和 items 数组',
             'data' => null,
         ]);
     }
