@@ -8,9 +8,9 @@
 
 - **定位**：用户资产中心 · PC 管理系统，**纯 API 服务**（无服务端页面、无前端构建产物）。
 - **框架**：Laravel 13（PHP ^8.3）。
-- **数据层**：外部 MySQL 主库 + `data_bridge` 第二库 + Redis（`.env` 指向 `host.docker.internal`）。
+- **数据层**：外部 MySQL 主库 + Redis（`.env` 指向 `host.docker.internal`）。
 - **部署**：Docker Compose（PHP-FPM + Nginx）；宿主机端口由 `.env` 的 `PC_MANAGEMENT_HTTP_PORT` 配置。
-- **认证**：Laravel Sanctum Personal Access Token，有效期 7 天；使用自定义 `km_admin_personal_access_tokens` 表；同一账号只允许一份有效凭证。
+- **认证**：会员令牌由上游 IAM 签发并保存于 Redis，由 `member.auth` 中间件校验；后台账号表只由 `KmAuthSeeder` 初始化，暂未接入接口。
 - **路由**：属性路由（注解）`spatie/laravel-route-attributes`，只扫描 `app/Http/Controllers/Api/`。
 - **响应**：统一 `ResponseHelper` → `{ code, message, data }`；全局异常渲染已配置于 `bootstrap/app.php`。
 - **业务码**：`App\Enums\ApiCode`（int backed enum，`SUCCESS=0`、`ERROR=-1`、`INVALID_PARAMS=-1001`、`UNAUTHORIZED=-1002`、`FORBIDDEN=-1003`、`NOT_FOUND=-1004`、`CONFLICT=-1005`）。
@@ -20,10 +20,10 @@
 | 状态 | 内容 | 说明 |
 | --- | --- | --- |
 | ✅ 已实现 | `GET /api/health`；`ApiCode`、`UserStatus` 枚举；`ResponseHelper`；全局异常渲染（`bootstrap/app.php`）；`ApiCodeTest`、`ResponseHelperTest`、健康接口 Feature 测试 | 有代码或测试支撑 |
-| ✅ 已实现 | 认证系统：`POST /api/auth/login`、`GET /api/auth/me`、`POST /api/auth/logout`；Laravel Sanctum + `km_admin_personal_access_tokens`；RBAC 权限中间件（`account.status`、`permission`）；`km_admin_users`、`km_admin_roles`、`km_admin_permissions`、`km_admin_user_roles`、`km_admin_role_permissions`、`km_admin_personal_access_tokens` 六张表；`KmAuthSeeder` | 完整认证和 RBAC 闭环，有测试 |
+| ✅ 已实现 | 会员认证：`/api/auth/captcha`、`/api/auth/sms/send`、`/api/auth/login/password`、`/api/auth/login/sms`、`/api/auth/login/confirm`、`/api/auth/logout`、登录协议查询；上游 IAM 签发令牌，`member.auth` 从 Redis 校验；`KmAuthSeeder` 初始化后台账号与超管角色 | 认证链路有测试；后台管理表暂无接口使用 |
 | ✅ 已实现 | `CacheManager`、`CacheScope`；`config/cache.php` redis_connection/namespace/version/hash_key；`CacheScopeTest` | Redis Factory 注入、HMAC key，直接使用 Redis 命令，未绑定业务缓存类 |
 | ⚠️ Demo/示例 | `DemoProductController`、`DemoProductRequest`、`DemoProductService`、`DemoProductRepository`、`DemoProductModel` 模型；`docs/architecture/*` | Controller/Request 一一对应，Factory 和 Feature 测试已补齐；仍是学习材料，未验收，不得作为已交付能力描述 |
-| ✅ 外部数据库 | 两套数据库表结构由开发者在数据库侧人工建立和维护；开发与镜像两套 Compose 均只启动 app/nginx，不创建 db/redis | 应用通过 `DB_*` 和 `DATA_BRIDGE_DB_*` 连接外部依赖 |
+| ✅ 外部数据库 | 数据库表结构由开发者在数据库侧人工建立和维护；开发与镜像两套 Compose 均只启动 app/nginx，不创建 db/redis | 应用通过 `DB_*` 连接外部依赖 |
 
 ---
 
@@ -54,7 +54,7 @@ Request(FormRequest)
 3. Model 与 Repository 按业务数据表一一对应——物理表 `km_admin_users` 映射为 `AdminUserModel` 和 `AdminUserRepository`；类名、文件名和 `$table` 使用去掉物理前缀后的完整逻辑表名，`km_` 由 `config/database.php` 的连接前缀统一追加。Repository 只能注入对应 Model，禁止使用 `AuthRepository` 等流程名聚合多个表。
 4. Repository 是必需层——**所有数据库查询（含简单 CRUD）必须收敛到对应 Repository**，Service 内禁止直接使用 `Model::` / Query Builder 查询；关联关系和查询作用域定义在 Model，Repository 调用这些定义完成关联查询。
 5. Request 负责验证——每个资源的 Controller 对应一个同实体 Request，由 Request 按 Controller 动作分发规则；**永远不要在 Controller 里写 `$request->validate()` 或其他验证逻辑**。
-6. 统一响应——所有 API 必须通过 `ResponseHelper` 返回 `code/message/data`，**禁止自行拼 JSON**（`UserController.php` 中的旧式手拼响应属于反例，勿模仿）；Controller 直接 `return ResponseHelper::xxx(...)`，**禁止再 `response()->json()` 二次包装**。
+6. 统一响应——所有 API 必须通过 `ResponseHelper` 返回 `code/message/data`，**禁止自行拼 JSON**；Controller 直接 `return ResponseHelper::xxx(...)`，**禁止再 `response()->json()` 二次包装**。
 
 ---
 
@@ -69,11 +69,10 @@ pc-management-system/
 │   ├── Http/
 │   │   ├── Controllers/
 │   │   │   ├── Controller.php    # 基类
-│   │   │   ├── Api/              # ⚠️ 唯一会被注解路由扫描的目录
-│   │   │   │   └── {模块}/       # 按业务模块分子目录（如 Product/）
-│   │   │   └── UserController.php  # ⚠️ 遗留 Demo，位于扫描范围外，勿新增此类文件
+│   │   │   └── Api/              # ⚠️ 唯一会被注解路由扫描的目录
+│   │   │       └── {模块}/       # 按业务模块分子目录（如 Product/）
 │   │   ├── Requests/             # FormRequest：每个 Controller 对应一个同实体 Request
-│   │   └── Middleware/           # 认证、账号状态和权限中间件
+│   │   └── Middleware/           # 会员令牌认证中间件
 │   ├── Models/                   # 每张业务表一个 {实体}Model
 │   ├── Repositories/             # 每个 Model 对应一个 {实体}Repository
 │   ├── Services/                 # 业务逻辑层
@@ -829,6 +828,18 @@ enum UserStatus: string
 - **安全**：适配层逻辑 key 结构为 `namespace:version:scope:HMAC-SHA256(identifier)`；直接 Redis 的后端前缀来自 `REDIS_PREFIX`，`CACHE_PREFIX` 不作用于此路径。缓存值不等于加密；不记录原始标识、token 或值。
 - **配置**：`config/cache.php` 的 `redis_connection`、`namespace`、`version`、`hash_key` 分别对应 `CACHE_REDIS_CONNECTION`、`CACHE_NAMESPACE`、`CACHE_VERSION`、`CACHE_HASH_KEY`；hash key 未设置时回退 `APP_KEY`。
 
+### 4.8 外部 HTTP 请求
+
+- 所有新增外部 HTTP 调用统一注入 `App\Services\ExternalHttpClient`，使用其 `get()`、`post()` 或 `request()`；业务代码不直接使用 `Http::` 发请求。
+- `HttpExternalAuthClient` 只承载认证接口；其他业务可在对应 Service/客户端中复用通用请求层，不依赖认证客户端。
+- **网关分流**：登录认证（含登录短信、密码/验证码登录、身份确认）和数证使用 `ExternalGateway::IDENTITY`，由 `IDENTITY_GATEWAY_BASE_URL` 配置，默认 `http://101.200.147.55:18080`；其他业务默认 `ExternalGateway::DEFAULT`，使用原网关。
+- **原网关兼容**：`EXTERNAL_HTTP_BASE_URL` 未设置时回退到旧 `MEMBER_AUTH_BASE_URL`；旧变量原值保留，不要改成身份网关。显式配置空值会报配置错误，不自动切换到另一网关。
+- **新调用写法**：传网关内的相对路径（包含上游模块/API 前缀），由通用层选择并拼接网关；数证必须显式传 `gateway: ExternalGateway::IDENTITY`。既有完整 URL 调用保持目标地址不变，`service` 只用于日志区分，不负责路由选择。
+- 上游包含业务状态码时，调用方必须提供 `isSuccessful` 判断规则（例如认证 `code=OK`）；未提供时只判断 HTTP 2xx，无法识别 HTTP 200 的业务失败。
+- 通用层负责请求 ID、超时、失败分类和脱敏日志；业务代码不重复写同一次外部调用的失败日志。成功调用不记日志。
+- 连接/配置/判断规则异常在记录后继续抛出；HTTP/业务失败返回原始 Response，由 Service 决定如何转换为本项目响应。
+- 使用说明、配置和示例见 `docs/architecture/08_外部接口调用与日志.md`。
+
 ## 5. 路由规范
 
 1. **业务路由一律使用注解路由**，写在 Controller 方法上；`routes/api.php` 只放全局/兜底路由（如 `GET /api/health`）。⚠️ 路由扫描配置在 `config/route-attributes.php`，**仅扫描 `app/Http/Controllers/Api/` 目录下以 `*Controller.php` 结尾的文件**——新控制器必须放在 `app/Http/Controllers/Api/` 下才会生效。
@@ -845,7 +856,7 @@ enum UserStatus: string
 | 更新 | PUT/PATCH | `/{id}` | `api.{m}.update` |
 | 删除 | DELETE | `/{id}` | `api.{m}.destroy` |
 
-5. **需要认证的路由**按已确认需求在注解上声明认证与权限中间件。
+5. **需要认证的路由**按已确认需求在注解上声明认证中间件。
 6. 验证路由是否注册：`docker compose -f docker-compose.image.yml exec -T app php artisan route:list --path=api`（主机 PHP 7.4 不满足 `^8.3`，统一在容器内执行）。
 
 ---
@@ -976,28 +987,16 @@ enum UserStatus: string
 - 外键/索引根据查询需要维护；关联字段命名 `{实体}_id`。
 - 状态类字段取值用 Enum 管理，默认值在数据库侧维护。
 
-### 9.1 双数据库规范
-
-- 主业务库连接名固定为 `mysql`；第二数据库连接名固定为 `data_bridge`。
-- 主库使用 `DB_*` 配置，第二库使用 `DATA_BRIDGE_DB_*` 配置；业务代码禁止直接读取环境变量。
-- 涉及双库的每个 Model 必须声明固定的 `$connection`：A 库为 `mysql`，B 库为 `data_bridge`；禁止根据请求参数动态切换连接。
-- 每张表仍只对应一个 Model 和一个 Repository；Repository 只能注入所属连接的对应 Model。
-- Service 通过多个 Repository 编排跨库流程；Service/Controller 禁止直接使用 `Model::`、`DB::table()` 或 Query Builder 查询业务表。
-- 不使用跨库 SQL JOIN；需要组合结果时，分别查询后由 Service 按业务键组装。
-- 事务必须显式指定连接：`DB::connection('mysql')->transaction(...)` 或 `DB::connection('data_bridge')->transaction(...)`。一个连接的提交/回滚不会自动影响另一个连接。
-- 跨库写入不使用 XA/两阶段提交；必须使用业务唯一键保证幂等，并设计失败重试或补偿。
-- B 库表的前缀由 `DATA_BRIDGE_DB_PREFIX` 配置；Model 的 `TABLE` 和 `$table` 只写逻辑表名。
-
 ---
 
 ## 10. 测试规范
 
 - **位置**：HTTP / 数据库 / JSON 契约测试 → `tests/Feature/`（按模块分子目录，如 `tests/Feature/Product/`）；纯逻辑（无 I/O）→ `tests/Unit/`。
 - **命名**：文件 `*Test.php`（`PascalCase`）；方法 `test_` 前缀（如 `test_valid_login`）。
-- **必须使用** `RefreshDatabase`；构造测试数据用 Factory（`AdminUserModel::factory()->create([...])`）。
+- **必须使用** `RefreshDatabase`；构造测试数据用 Factory（`DemoProductModel::factory()->create([...])`）。
 - **断言**：`assertStatus()` + `assertJsonStructure()` + `assertJson()`，校验 code/message/data 契约。
 - **覆盖要求**：每个新接口必须覆盖 ①成功场景 ②校验失败（422）③关键错误状态（401/404/400）；合并前运行完整测试套件。
-- **隔离**：`phpunit.xml` 为 `mysql` 和 `data_bridge` 两个连接分别使用 SQLite 内存库，另使用 array cache/session、sync queue；测试**不得连接外部开发/生产数据库**。
+- **隔离**：`phpunit.xml` 为 `mysql` 连接使用 SQLite 内存库，另使用 array cache/session、sync queue；测试**不得连接外部开发/生产数据库**。
 - **运行**：`docker compose -f docker-compose.image.yml exec -T app php artisan test --no-coverage`；只跑单个文件 `php artisan test --filter=ApiCodeTest`。
 
 ---
@@ -1011,8 +1010,7 @@ enum UserStatus: string
 
 # 2. 模型（含 fillable/casts/作用域/关联/枚举引用）
 docker compose -f docker-compose.image.yml exec -T app php artisan make:model ProductModel
-#    生成后设置 public const TABLE = 'products'、protected $connection = 'mysql' 和 protected $table = self::TABLE
-#    B 库实体将 protected $connection 改为 'data_bridge'
+#    生成后设置 public const TABLE = 'products' 和 protected $table = self::TABLE
 
 # 3. 枚举（状态类字段）
 #    app/Enums/ProductStatus.php
@@ -1042,8 +1040,6 @@ docker compose -f docker-compose.image.yml exec -T app php artisan make:controll
 - [ ] Repository 只注入对应 Model，所有数据访问（含 CRUD）都走 Repository
 - [ ] 关联关系定义在 Model，并由对应 Repository 调用
 - [ ] Service/Controller 中无直接 `Model::` 查询或 Query Builder
-- [ ] 双库实体已在 Model 固定声明 `mysql` 或 `data_bridge` 连接，未从请求参数动态选择
-- [ ] 跨库流程通过多个 Repository 编排，事务显式指定连接，并具备幂等键/重试或补偿策略
 - [ ] 写操作走 Service + 事务，失败抛异常；数据不存在用 `errorIf`，不返回 404
 - [ ] 全部通过 `ResponseHelper` 返回 `code/message/data`
 - [ ] 路由命名 `api.{模块}.{action}`，`php artisan route:list --path=api` 可见
@@ -1078,3 +1074,22 @@ docker compose -f docker-compose.image.yml exec -T app php artisan make:controll
 - 输出用户数据前注意 `Hidden`/`hidden` 隐藏敏感字段（密码、remember_token）。
 - 修改数据库结构或数据须由开发者在数据库侧明确执行，AI 不得擅自执行破坏性命令。
 - 排序字段、排序方向、分页大小必须白名单与限界，不得直接把请求参数传给 `orderBy()`。
+
+---
+
+## Agent skills
+
+### Issue tracker
+
+本项目的任务与规格使用 GitHub Issues（`yk-jinbo/ai-`），操作约定见 `docs/agents/issue-tracker.md`。
+
+### Domain docs
+
+采用 single-context 布局：根目录 `GLOSSARY.md` 和 `docs/adr/`，均按需创建；读取约定见 `docs/agents/domain.md`。
+
+### Ponytail
+
+项目级技能位于 `.agents/skills/ponytail/`，用于在满足已确认需求的前提下复用现有实现、减少不必要代码。
+
+- 精简建议必须遵守本文的分层、Repository 查询格式、方法职责与长度、中文 PHPDoc、校验、安全、测试覆盖和验证要求。
+- 使用 `grilling` 或 `grill-with-docs` 澄清需求时，继续遵循其提问与确认流程；Ponytail 不得自行缩减已确认范围，或省略必要的规格、词汇表与 ADR 更新。

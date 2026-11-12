@@ -1,2 +1,11 @@
 *
 !.gitignore
+!Feature/
+!Feature/ExternalHttp/
+!Feature/ExternalHttp/*Test.php
+!Feature/Auth/
+!Feature/Auth/*Test.php
+!Feature/Certificate/
+!Feature/Certificate/*Test.php
+!Deployment/
+!Deployment/test_*.py

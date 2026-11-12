@@ -2,8 +2,7 @@
 
 use App\Enums\ApiCode;
 use App\Helpers\ResponseHelper;
-use App\Http\Middleware\CheckPermission;
-use App\Http\Middleware\EnsureAccountStatus;
+use App\Http\Middleware\AuthenticateMemberToken;
 use Exception as GlobalException;
 use Illuminate\Auth\AuthenticationException;
 use Illuminate\Database\QueryException;
@@ -12,6 +11,8 @@ use Illuminate\Foundation\Configuration\Exceptions;
 use Illuminate\Foundation\Configuration\Middleware;
 use Illuminate\Http\Request;
 use Illuminate\Validation\ValidationException;
+use Symfony\Component\HttpFoundation\Response as HttpResponse;
+use Symfony\Component\HttpKernel\Exception\MethodNotAllowedHttpException;
 use Symfony\Component\HttpKernel\Exception\NotFoundHttpException;
 use Throwable as GlobalThrowable;
 
@@ -24,14 +25,25 @@ return Application::configure(basePath: dirname(__DIR__))
     ->withMiddleware(function (Middleware $middleware): void {
         $middleware->redirectGuestsTo(null);
         $middleware->alias([
-            'account.status' => EnsureAccountStatus::class,
-            'permission' => CheckPermission::class,
+            'member.auth' => AuthenticateMemberToken::class,
         ]);
     })
     ->withExceptions(function (Exceptions $exceptions): void {
         $exceptions->render(function (GlobalThrowable $exception, Request $request) {
             if (! $request->is('api/*') && ! $request->expectsJson()) {
                 return null;
+            }
+
+            // 保留路由允许的方法，避免客户端把请求方式错误误判为上游服务故障。
+            if ($exception instanceof MethodNotAllowedHttpException) {
+                $headers = $exception->getHeaders();
+
+                return ResponseHelper::response(
+                    null,
+                    '请求方法不支持，请使用 '.$headers['Allow'],
+                    ApiCode::ERROR,
+                    HttpResponse::HTTP_METHOD_NOT_ALLOWED,
+                )->withHeaders($headers);
             }
 
             if ($exception instanceof ValidationException) {

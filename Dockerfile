@@ -44,8 +44,9 @@ RUN composer install \
 
 COPY . .
 
-# 依赖安装跳过脚本后，在完整源码存在时生成 Laravel 包清单。
-RUN php artisan package:discover --ansi \
+# 先检查认证类和验证码背景是否随源码交付，再生成 Laravel 包清单。
+RUN php scripts/check-runtime-assets.php \
+    && php artisan package:discover --ansi \
     && mkdir -p \
         storage/framework/cache \
         storage/framework/data \

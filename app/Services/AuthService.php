@@ -2,126 +2,375 @@
 
 namespace App\Services;
 
+use App\Caches\CacheManager;
+use App\Caches\CacheScope;
 use App\Enums\ApiCode;
 use App\Helpers\ResponseHelper;
-use App\Models\AdminUserModel;
-use App\Repositories\AdminPersonalAccessTokenRepository;
-use App\Repositories\AdminUserRepository;
-use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Arr;
+use Illuminate\Support\Str;
 
+/**
+ * 会员认证业务服务。
+ *
+ * 负责滑块校验、上游认证结果转换和外部令牌的本地 Redis 保存，不访问本地数据库。
+ */
 class AuthService
 {
+    private const DEFAULT_TICKET_TTL_SECONDS = 300;
+
+    private const LOGIN_MOBILE_CACHE_SCOPE = 'auth-login-mobiles';
+
+    private const TICKET_HASH_ALGORITHM = 'sha256';
+
+    /**
+     * 注入上游认证客户端、本地令牌服务和滑块验证码服务。
+     *
+     * @param  ExternalAuthClient  $externalAuthClient  上游会员认证客户端
+     * @param  AuthTokenService  $authTokenService  本地 Redis 令牌服务
+     * @param  LoginCaptchaService  $loginCaptchaService  本地滑块验证码服务
+     * @param  CacheManager  $cacheManager  登录票据临时信息缓存适配器
+     * @return void
+     */
     public function __construct(
-        private AdminUserRepository $userRepository,
-        private AdminPersonalAccessTokenRepository $personalAccessTokenRepository,
+        private ExternalAuthClient $externalAuthClient,
+        private AuthTokenService $authTokenService,
         private LoginCaptchaService $loginCaptchaService,
+        private CacheManager $cacheManager,
     ) {}
 
-    /**
-     * 校验滑块验证码并签发后台登录凭证。
-     *
-     * 业务逻辑：验证码在数据库事务前一次性消费，避免无效请求持有账号行锁。
-     *
-     * @param  string  $username  后台账号
-     * @param  string  $password  后台密码
-     * @param  string  $captchaId  滑块验证码标识
-     * @param  int  $offsetX  滑块目标横坐标
-     * @return array<string, mixed> 登录凭证和当前用户信息
-     */
-    public function login(string $username, string $password, string $captchaId, int $offsetX): array
+    /** 发送短信前消费本地滑块验证码，再转发登录短信请求。 */
+    public function sendSms(string $mobile, string $captchaId, int $offsetX): string
     {
         $this->loginCaptchaService->verify($captchaId, $offsetX);
+        $result = $this->externalAuthClient->sendSms($mobile);
+        $this->ensureSuccess($result, '验证码发送失败');
 
-        DB::beginTransaction();
-        try {
-            // 锁定账号行，保证同一账号的旧凭证撤销与新凭证签发不会交叉执行。
-            $user = $this->userRepository->findByUsernameForUpdate($username);
+        return $result->message !== null && $result->message !== ''
+            ? $result->message
+            : '验证码已发送';
+    }
 
-            // 验证用户是否存在、密码是否正确、账号状态是否可登录
-            // 统一返回"用户名或密码错误"，不泄露账号是否存在或具体状态
-            ResponseHelper::errorIf(
-                ! $user || ! $this->userRepository->verifyPassword($user, $password) || ! $user->canLogin(),
-                '用户名或密码错误',
-                ApiCode::UNAUTHORIZED
-            );
-
-            // 并发安全：撤销旧凭证并签发新凭证
-            $this->personalAccessTokenRepository->revokeAllFor($user);
-
-            // 创建新令牌，有效期 7 天
-            $token = $this->personalAccessTokenRepository->issueFor($user, now()->addDays(7));
-
-            // 更新最后登录时间
-            $this->userRepository->updateLastLoginAt($user);
-
-            // 在事务内完成角色/权限快照，避免提交后序列化失败导致客户端拿不到已签发凭证。
-            $serializedUser = $this->serializeUser($user);
-
-            DB::commit();
-
-            return [
-                'token' => $token->plainTextToken,
-                'token_type' => 'Bearer',
-                'expires_at' => $token->accessToken->expires_at?->toIso8601String(),
-                'user' => $serializedUser,
-            ];
-        } catch (\Throwable $e) {
-            if (DB::transactionLevel() > 0) {
-                DB::rollBack();
-            }
-
-            throw $e;
+    /** 校验账号密码并返回待确认的身份集合，不签发访问令牌。 */
+    public function preparePasswordLogin(
+        string $username,
+        string $password,
+        string $captchaId,
+        int $offsetX,
+    ): AuthLoginResult {
+        $this->loginCaptchaService->verify($captchaId, $offsetX);
+        $result = $this->externalAuthClient->preparePasswordLogin($username, $password);
+        $this->ensureSuccess($result, '账号或密码错误');
+        $data = $this->normalizePrepareData($result->data);
+        $mobile = $this->normalizeLoginMobile($username);
+        if ($mobile !== null) {
+            $this->rememberLoginMobile($data['ticket'], $mobile, $data['expires_in']);
         }
+
+        return new AuthLoginResult(
+            $data,
+            $result->message !== null && $result->message !== '' ? $result->message : '登录校验成功',
+        );
+    }
+
+    /** 校验短信验证码并返回待确认的身份集合，不签发访问令牌。 */
+    public function prepareSmsLogin(string $mobile, string $code): AuthLoginResult
+    {
+        $result = $this->externalAuthClient->prepareSmsLogin($mobile, $code);
+        $this->ensureSuccess($result, '验证码错误或已过期');
+        $data = $this->normalizePrepareData($result->data);
+        $this->rememberLoginMobile($data['ticket'], $mobile, $data['expires_in']);
+
+        return new AuthLoginResult(
+            $data,
+            $result->message !== null && $result->message !== '' ? $result->message : '登录校验成功',
+        );
     }
 
     /**
-     * 获取当前用户信息
+     * 查询协议清单并转换为本项目字段，协议版本和摘要保持上游原值。
+     *
+     * @param  string  $memberType  用户选择的身份
+     * @param  string  $scene  协议场景，登录使用 LOGIN
+     * @return AuthLoginResult 本项目格式的协议清单及提示
+     *
+     * @throws \Exception 上游协议清单查询失败时抛出
      */
-    public function getCurrentUser(AdminUserModel $user): array
+    public function agreementPolicy(string $memberType, string $scene): AuthLoginResult
     {
+        $result = $this->externalAuthClient->agreementPolicy($memberType, $scene);
+        $this->ensureSuccess($result, '协议清单获取失败');
+
+        return new AuthLoginResult($this->normalizeAgreementData($result->data), $result->message ?: '协议清单获取成功');
+    }
+
+    /**
+     * 读取协议正文，转换元数据字段名并保留正文的块、片段和样式。
+     *
+     * @param  string  $versionId  清单中的协议版本 ID
+     * @return AuthLoginResult 本项目格式的协议正文及提示
+     *
+     * @throws \Exception 上游协议正文查询失败时抛出
+     */
+    public function agreementVersion(string $versionId): AuthLoginResult
+    {
+        $result = $this->externalAuthClient->agreementVersion($versionId);
+        $this->ensureSuccess($result, '协议正文获取失败');
+
+        return new AuthLoginResult($this->normalizeAgreementData($result->data), $result->message ?: '协议正文获取成功');
+    }
+
+    /**
+     * 提交所选身份及客户端确认的协议版本，成功后保存用户信息和上游令牌。
+     *
+     * @param  string  $ticket  登录校验票据
+     * @param  string  $memberType  所选身份
+     * @param  array<string, mixed>|null  $agreementConsent  同意状态、协议摘要和完整版本集合
+     * @return AuthLoginResult 旧项目格式的登录结果
+     *
+     * @throws \Exception 上游确认失败或未返回访问令牌时抛出
+     */
+    public function confirmLogin(string $ticket, string $memberType, ?array $agreementConsent = null): AuthLoginResult
+    {
+        $loginMobile = $this->loginMobileForTicket($ticket);
+        $result = $this->externalAuthClient->confirmLogin($ticket, $memberType, $agreementConsent);
+        $this->ensureSuccess($result, '登录确认失败');
+
+        $data = $this->normalizeTokenData($result->data, $memberType);
+        $token = (string) ($data['token'] ?? '');
+        ResponseHelper::errorIf($token === '', '登录响应缺少访问令牌', ApiCode::ERROR);
+        $user = $this->storedUser($result->data, $data, $memberType, $loginMobile);
+        $data['user'] = $user;
+
+        $this->authTokenService->store(
+            $token,
+            $user,
+            $data['expires_in'],
+        );
+        if ($loginMobile !== null) {
+            $this->forgetLoginMobile($ticket);
+        }
+
+        return new AuthLoginResult(
+            $data,
+            $result->message !== null && $result->message !== '' ? $result->message : '登录成功',
+        );
+    }
+
+    /**
+     * 清除本地 Redis 中保存的登录令牌。
+     *
+     * @return void 从当前请求读取令牌并清除对应用户缓存
+     */
+    public function logout(): void
+    {
+        $this->authTokenService->revoke();
+    }
+
+    private function ensureSuccess(ExternalAuthResult $result, string $fallbackMessage): void
+    {
+        ResponseHelper::errorIf(
+            ! $result->success,
+            $result->message !== null && $result->message !== '' ? $result->message : $fallbackMessage,
+            $this->resolveApiCode($result->code),
+        );
+    }
+
+    /**
+     * @param  array<string, mixed>  $data
+     * @return array{ticket: string, expires_in: int, member_types: array<int, string>}
+     */
+    private function normalizePrepareData(array $data): array
+    {
+        $ticket = (string) ($data['ticket'] ?? '');
+        $memberTypes = $data['memberTypes'] ?? $data['member_types'] ?? [];
+        $memberTypes = is_array($memberTypes)
+            ? array_values(array_filter(array_map(static fn (mixed $type): string => (string) $type, $memberTypes)))
+            : [];
+
+        ResponseHelper::errorIf($ticket === '', '登录校验响应缺少票据', ApiCode::ERROR);
+
         return [
-            'user' => $this->serializeUser($user),
+            'ticket' => $ticket,
+            'expires_in' => max(
+                1,
+                (int) ($data['expiresIn'] ?? $data['expires_in'] ?? self::DEFAULT_TICKET_TTL_SECONDS),
+            ),
+            'member_types' => $memberTypes,
         ];
     }
 
-    /**
-     * 用户登出
-     */
-    public function logout(AdminUserModel $user): void
+    private function normalizeLoginMobile(string $mobile): ?string
     {
-        $this->personalAccessTokenRepository->revokeCurrentFor($user);
+        $mobile = trim($mobile);
+
+        return preg_match('/^1[3-9]\\d{9}$/', $mobile) === 1 ? $mobile : null;
+    }
+
+    private function rememberLoginMobile(string $ticket, string $mobile, int $expiresIn): void
+    {
+        $scope = $this->loginMobileScope();
+        $stored = $scope->connection()->setex($this->loginMobileCacheKey($ticket), max(1, $expiresIn), $mobile);
+        ResponseHelper::errorIf($stored === false, '登录信息暂时无法保存，请重试', ApiCode::ERROR);
+    }
+
+    private function loginMobileForTicket(string $ticket): ?string
+    {
+        $scope = $this->loginMobileScope();
+        $mobile = $scope->connection()->get($this->loginMobileCacheKey($ticket));
+
+        return is_string($mobile) && $mobile !== '' ? $mobile : null;
+    }
+
+    private function forgetLoginMobile(string $ticket): void
+    {
+        $scope = $this->loginMobileScope();
+        $scope->connection()->del($this->loginMobileCacheKey($ticket));
+    }
+
+    private function loginMobileCacheKey(string $ticket): string
+    {
+        return $this->loginMobileScope()->key(hash(self::TICKET_HASH_ALGORITHM, $ticket));
+    }
+
+    private function loginMobileScope(): CacheScope
+    {
+        return $this->cacheManager->scope(self::LOGIN_MOBILE_CACHE_SCOPE);
+    }
+
+    /** @param array<string, mixed> $data @return array<string, mixed> */
+    private function normalizeAgreementData(array $data): array
+    {
+        $normalized = [];
+        foreach ($data as $key => $value) {
+            $normalized[Str::snake($key)] = $value;
+        }
+        // 版本 ID 可能超出 JavaScript 安全整数范围，整个中转流程按字符串传递。
+        if (isset($normalized['version_id'])) {
+            $normalized['version_id'] = (string) $normalized['version_id'];
+        }
+        if (isset($normalized['documents']) && is_array($normalized['documents'])) {
+            $normalized['documents'] = [];
+            foreach ($data['documents'] as $document) {
+                $normalized['documents'][] = $this->normalizeAgreementData($document);
+            }
+        }
+
+        return $normalized;
     }
 
     /**
-     * 按 AuthUser 契约生成脱敏账号数据。
-     *
+     * @param  array<string, mixed>  $data
      * @return array<string, mixed>
      */
-    private function serializeUser(AdminUserModel $user): array
+    private function normalizeTokenData(array $data, string $memberType): array
     {
-        $user = $this->userRepository->loadAuthorizationContext($user);
-        $isSuperAdmin = $user->roles->contains(
-            static fn ($role): bool => (bool) $role->is_super_admin,
+        $token = (string) ($data['accessToken'] ?? $data['access_token'] ?? '');
+        $expiresIn = max(
+            1,
+            (int) ($data['expiresIn']
+                ?? $data['expires_in']
+                ?? config('services.member_auth.token_ttl_seconds', 172800)),
         );
-        $permissions = $user->roles
-            ->flatMap(static fn ($role) => $role->permissions->pluck('code'))
-            ->filter(static fn ($code): bool => is_string($code) && $code !== '')
-            ->unique()
-            ->values()
-            ->all();
-
-        if ($isSuperAdmin && ! in_array('*', $permissions, true)) {
-            array_unshift($permissions, '*');
-        }
 
         return [
-            'id' => $user->id,
-            'username' => $user->username,
-            'phone' => $user->phone,
-            'status' => $user->status->value,
-            'is_super_admin' => $isSuperAdmin,
-            'roles' => $user->roles->pluck('code')->values()->all(),
-            'permissions' => $permissions,
+            'token' => $token,
+            'token_type' => (string) ($data['tokenType'] ?? $data['token_type'] ?? 'Bearer'),
+            'expires_in' => $expiresIn,
+            'refresh_token' => $data['refreshToken'] ?? $data['refresh_token'] ?? null,
+            'member_type' => $memberType,
+            'password_change_required' => $data['passwordChangeRequired'] ?? $data['password_change_required'] ?? null,
+            'password_change_reason' => $data['passwordChangeReason'] ?? $data['password_change_reason'] ?? null,
+            'virtual_login_confirmation_required' => $data['virtualLoginConfirmationRequired']
+                ?? $data['virtual_login_confirmation_required']
+                ?? false,
+            'virtual_login_confirmation_ticket' => $data['virtualLoginConfirmationTicket']
+                ?? $data['virtual_login_confirmation_ticket']
+                ?? null,
+            'virtual_login_confirmation_expires_in' => $data['virtualLoginConfirmationExpiresIn']
+                ?? $data['virtual_login_confirmation_expires_in']
+                ?? null,
+            'user' => is_array($data['user'] ?? null) ? $data['user'] : null,
         ];
+    }
+
+    /**
+     * @param  array<string, mixed>  $externalData
+     * @param  array<string, mixed>  $normalizedData
+     * @return array<string, mixed>
+     */
+    private function storedUser(
+        array $externalData,
+        array $normalizedData,
+        string $memberType,
+        ?string $loginMobile,
+    ): array {
+        $user = $externalData['user']
+            ?? $externalData['member']
+            ?? $externalData['memberInfo']
+            ?? $externalData['userInfo']
+            ?? null;
+        $mobile = $loginMobile ?? (is_array($user)
+            ? $this->extractMobile($user) ?? $this->extractMobile($externalData)
+            : $this->extractMobile($externalData));
+        if (is_array($user)) {
+            if ($mobile !== null) {
+                $user['mobile'] = $mobile;
+            }
+            $user['member_type'] ??= $memberType;
+
+            return $user;
+        }
+
+        $storedUser = Arr::except($normalizedData, ['token', 'refresh_token', 'user', 'token_type', 'expires_in']) + [
+            'member_type' => $memberType,
+        ];
+        if ($mobile !== null) {
+            $storedUser['mobile'] = $mobile;
+        }
+
+        return $storedUser;
+    }
+
+    /**
+     * 从登录成功响应中提取用户手机号，兼容常见上游字段名和用户对象。
+     *
+     * @param  array<string, mixed>  $data  上游登录成功数据
+     * @return string|null 登录成功响应中的手机号
+     */
+    private function extractMobile(array $data): ?string
+    {
+        foreach (['mobile', 'phone', 'telephone'] as $field) {
+            $value = $data[$field] ?? null;
+            if (is_scalar($value) && trim((string) $value) !== '') {
+                return trim((string) $value);
+            }
+        }
+
+        foreach (['user', 'member', 'memberInfo', 'userInfo'] as $field) {
+            if (is_array($data[$field] ?? null)) {
+                $mobile = $this->extractMobile($data[$field]);
+                if ($mobile !== null) {
+                    return $mobile;
+                }
+            }
+        }
+
+        return null;
+    }
+
+    private function resolveApiCode(?string $code): ApiCode
+    {
+        return match ($code) {
+            'PARAM_INVALID' => ApiCode::INVALID_PARAMS,
+            'AUTH_FAIL',
+            'SMS_CODE_EXPIRED',
+            'SMS_CODE_INVALID',
+            'SMS_VERIFY_LOCKED',
+            'SMS_IP_LOCKED' => ApiCode::UNAUTHORIZED,
+            'NOT_FOUND' => ApiCode::NOT_FOUND,
+            'BIZ_CONFLICT', 'SMS_TOO_FREQUENT', 'SMS_DAILY_LIMIT', 'TENANT_UNASSIGNED',
+            'AGREEMENT_NOT_ACCEPTED', 'AGREEMENT_VERSION_CHANGED', 'AGREEMENT_SET_MISMATCH' => ApiCode::CONFLICT,
+            default => ApiCode::ERROR,
+        };
     }
 }

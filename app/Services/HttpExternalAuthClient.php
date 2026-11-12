@@ -2,278 +2,207 @@
 
 namespace App\Services;
 
-use App\Caches\CacheManager;
-use App\Enums\AuthLoginType;
-use Illuminate\Http\Client\ConnectionException;
-use Illuminate\Support\Facades\Http;
-use Illuminate\Support\Facades\Log;
-use Illuminate\Support\Str;
+use App\Enums\ExternalGateway;
+use Illuminate\Http\Client\Response;
 use Throwable;
 
+/**
+ * 会员认证 HTTP 客户端。
+ * 只组装认证接口参数和解析 {code,msg,traceId,data}，通用请求及失败日志由 ExternalHttpClient 处理。
+ */
 class HttpExternalAuthClient implements ExternalAuthClient
 {
-    private const PASSWORD_LOGIN_ENDPOINT = '/login';
+    private const SMS_SEND_ENDPOINT = 'sms/send';
 
-    private const SMS_LOGIN_ENDPOINT = '/login/sms';
+    private const PASSWORD_PREPARE_ENDPOINT = 'member/login/prepare';
 
-    private const SMS_SEND_ENDPOINT = '/sms/send';
+    private const SMS_PREPARE_ENDPOINT = 'member/login/sms/prepare';
 
-    private const BIZ_KEYS_ENDPOINT = '/biz-keys';
+    private const CONFIRM_ENDPOINT = 'member/login/confirm';
 
-    private const BIZ_KEYS_CACHE_SCOPE = 'open-auth-biz-keys';
+    private const AGREEMENT_POLICY_ENDPOINT = 'member/agreements/policy';
 
-    private const BIZ_KEYS_CACHE_IDENTIFIER = 'mapping';
-
-    private const BIZ_KEYS_CACHE_TTL_SECONDS = 86400;
-
-    private const CONNECT_TIMEOUT_SECONDS = 3;
-
-    private const TIMEOUT_SECONDS = 10;
-
-    public function __construct(
-        private CacheManager $cacheManager,
-    ) {}
+    private const AGREEMENT_VERSION_ENDPOINT = 'member/agreements/versions/';
 
     /**
-     * 调用外部认证接口验证登录信息。
+     * 注入通用外部请求客户端，认证接口共用超时、请求标识和异常日志。
+     *
+     * @param  ExternalHttpClient  $http  通用外部请求客户端
+     * @return void
      */
-    public function login(AuthLoginType $loginType, array $loginInfo): ExternalAuthResult
-    {
-        return match ($loginType) {
-            AuthLoginType::PASSWORD => $this->request(self::PASSWORD_LOGIN_ENDPOINT, [
-                'username' => (string) ($loginInfo['account'] ?? ''),
-                'password' => (string) ($loginInfo['password'] ?? ''),
-                'memberType' => 'NORMAL',
-            ]),
-            AuthLoginType::SMS => $this->request(self::SMS_LOGIN_ENDPOINT, [
-                'mobile' => (string) ($loginInfo['mobile'] ?? ''),
-                'code' => (string) ($loginInfo['code'] ?? ''),
-                'memberType' => 'NORMAL',
-            ]),
-        };
-    }
+    public function __construct(private ExternalHttpClient $http) {}
 
     /**
-     * 调用外部接口发送登录验证码。
+     * 转发登录短信请求。
+     *
+     * @param  string  $mobile  接收短信的手机号
+     * @return ExternalAuthResult 上游标准化响应
      */
     public function sendSms(string $mobile): ExternalAuthResult
     {
-        return $this->request(self::SMS_SEND_ENDPOINT, ['mobile' => $mobile]);
+        return $this->request(self::SMS_SEND_ENDPOINT, [
+            'mobile' => $mobile,
+            'scene' => 'LOGIN',
+        ]);
     }
 
     /**
-     * 发起外部请求并解析业务结果。
-     */
-    private function request(string $endpoint, array $payload): ExternalAuthResult
-    {
-        $baseUrl = rtrim((string) config('services.open_auth.base_url'), '/');
-        if ($baseUrl === '') {
-            Log::error('外部认证请求失败：未配置接口基址', [
-                'method' => 'POST',
-                'endpoint' => $endpoint,
-                'request' => $this->sanitizePayload($payload),
-            ]);
-
-            return new ExternalAuthResult(false);
-        }
-
-        $url = $baseUrl.$endpoint;
-
-        try {
-            $response = Http::acceptJson()
-                ->asJson()
-                ->connectTimeout(self::CONNECT_TIMEOUT_SECONDS)
-                ->timeout(self::TIMEOUT_SECONDS)
-                ->post($url, $payload);
-        } catch (ConnectionException $exception) {
-            Log::error('外部认证请求连接失败', [
-                'method' => 'POST',
-                'url' => $url,
-                'request' => $this->sanitizePayload($payload),
-                'exception' => $exception->getMessage(),
-            ]);
-
-            return new ExternalAuthResult(false);
-        }
-
-        $body = $response->json();
-        $data = is_array($body) && is_array($body['data'] ?? null) ? $body['data'] : [];
-        $bizKey = $this->extractBizKey($body, $data);
-        $success = $response->successful() && ($data['success'] ?? null) === true;
-        $message = $this->resolveBizKeyMessage($bizKey);
-
-        if (! $success) {
-            Log::warning('外部认证请求返回失败', [
-                'method' => 'POST',
-                'url' => $url,
-                'request' => $this->sanitizePayload($payload),
-                'http_status' => $response->status(),
-                'biz_key' => $bizKey,
-                'success' => $data['success'] ?? null,
-                'trace_id' => is_array($body) ? ($body['traceId'] ?? null) : null,
-            ]);
-        }
-
-        return new ExternalAuthResult($success, $bizKey, $message);
-    }
-
-    /**
-     * 解析标准响应中的 biz_key，并兼容上游异常响应的顶层 code。
-     */
-    private function extractBizKey(mixed $body, array $data): ?string
-    {
-        $candidate = $data['biz_key'] ?? (is_array($body) ? ($body['code'] ?? null) : null);
-        if (! is_string($candidate)) {
-            return null;
-        }
-
-        $candidate = trim($candidate);
-
-        return $candidate === '' ? null : $candidate;
-    }
-
-    /**
-     * 从缓存或上游字典中解析业务提示。
-     */
-    private function resolveBizKeyMessage(?string $bizKey): ?string
-    {
-        if ($bizKey === null) {
-            return null;
-        }
-
-        $message = $this->loadBizKeyMessages()[$bizKey] ?? null;
-        if (! is_string($message)) {
-            return null;
-        }
-
-        $message = trim($message);
-
-        return $message === '' ? null : $message;
-    }
-
-    /**
-     * 字典变化频率低，使用 Redis 缓存避免每次登录都请求上游。
+     * 转发账号密码登录校验。
      *
-     * @return array<string, string>
+     * @param  string  $username  账号或手机号
+     * @param  string  $password  登录密码
+     * @return ExternalAuthResult 上游标准化响应
      */
-    private function loadBizKeyMessages(): array
+    public function preparePasswordLogin(string $username, string $password): ExternalAuthResult
     {
-        $baseUrl = rtrim((string) config('services.open_auth.base_url'), '/');
-        if ($baseUrl === '') {
-            return [];
+        return $this->request(self::PASSWORD_PREPARE_ENDPOINT, [
+            'scene' => 'LOGIN',
+            'username' => $username,
+            'password' => $password,
+        ]);
+    }
+
+    /**
+     * 转发短信验证码登录校验。
+     *
+     * @param  string  $mobile  登录手机号
+     * @param  string  $code  短信验证码
+     * @return ExternalAuthResult 上游标准化响应
+     */
+    public function prepareSmsLogin(string $mobile, string $code): ExternalAuthResult
+    {
+        return $this->request(self::SMS_PREPARE_ENDPOINT, [
+            'scene' => 'LOGIN',
+            'mobile' => $mobile,
+            'code' => $code,
+        ]);
+    }
+
+    /**
+     * 匿名查询所选身份的协议清单，使用认证网关和通用失败日志。
+     *
+     * @param  string  $memberType  用户选择的身份
+     * @param  string  $scene  LOGIN 或 REGISTER 协议场景
+     * @return ExternalAuthResult 上游协议版本清单
+     */
+    public function agreementPolicy(string $memberType, string $scene): ExternalAuthResult
+    {
+        return $this->request(self::AGREEMENT_POLICY_ENDPOINT, [
+            'scene' => $scene,
+            'memberType' => $memberType,
+        ], 'GET');
+    }
+
+    /**
+     * 匿名读取清单指定的已发布协议版本，保持版本 ID 的字符串精度。
+     *
+     * @param  string  $versionId  上游协议版本 ID
+     * @return ExternalAuthResult 协议正文及版本信息
+     */
+    public function agreementVersion(string $versionId): ExternalAuthResult
+    {
+        return $this->request(self::AGREEMENT_VERSION_ENDPOINT.rawurlencode($versionId), [], 'GET');
+    }
+
+    /**
+     * 转发身份选择，将本项目协议字段转换为上游 agreementConsent 对象。
+     *
+     * @param  string  $ticket  登录校验票据
+     * @param  string  $memberType  选中的会员身份
+     * @param  array{accepted: bool, policy_hash?: string, documents?: list<array{document_code: string, version_id: string}>}|null  $agreementConsent  客户端提交的完整协议同意信息
+     * @return ExternalAuthResult 上游标准化响应
+     */
+    public function confirmLogin(string $ticket, string $memberType, ?array $agreementConsent = null): ExternalAuthResult
+    {
+        $payload = [
+            'ticket' => $ticket,
+            'memberType' => $memberType,
+        ];
+        // 同意状态和版本必须来自客户端；不自动获取新版本替换用户已阅读的版本。
+        if ($agreementConsent !== null) {
+            $payload['agreementConsent'] = $this->consentPayload($agreementConsent);
         }
 
-        $scope = null;
+        return $this->request(self::CONFIRM_ENDPOINT, $payload);
+    }
+
+    /** @param array<string, mixed> $payload */
+    private function request(string $endpoint, array $payload, string $method = 'POST'): ExternalAuthResult
+    {
+        $url = $this->url($endpoint);
         try {
-            $scope = $this->cacheManager->scope(self::BIZ_KEYS_CACHE_SCOPE);
-            $cached = $scope->connection()->get($scope->key(self::BIZ_KEYS_CACHE_IDENTIFIER));
-            if (is_string($cached) && $cached !== '') {
-                $decoded = json_decode($cached, true, 512, JSON_THROW_ON_ERROR);
-                $messages = $this->normalizeBizKeyMessages($decoded);
-                if ($messages !== []) {
-                    return $messages;
-                }
-            }
+            $response = $this->http->request(
+                method: $method,
+                url: $url ?? '',
+                data: $payload,
+                isSuccessful: static function (Response $response): bool {
+                    $code = $response->json('code');
+
+                    return is_scalar($code) && trim((string) $code) === 'OK';
+                },
+                options: [
+                    'connect_timeout' => (int) config('services.member_auth.connect_timeout', 3),
+                    'timeout' => (int) config('services.member_auth.timeout', 10),
+                ],
+                service: 'member_auth',
+                gateway: ExternalGateway::IDENTITY,
+            );
         } catch (Throwable $exception) {
-            Log::warning('外部认证业务字典缓存读取失败', [
-                'exception' => $exception->getMessage(),
-            ]);
+            // 通用层已经记录；认证层只保持原有的前端错误契约，不重复写日志。
+            return new ExternalAuthResult(false, 'INTERNAL_ERROR', $url === null ? '认证服务未配置' : '认证服务暂时不可用');
         }
 
-        $url = $baseUrl.self::BIZ_KEYS_ENDPOINT;
-        try {
-            $response = Http::acceptJson()
-                ->connectTimeout(self::CONNECT_TIMEOUT_SECONDS)
-                ->timeout(self::TIMEOUT_SECONDS)
-                ->get($url);
-        } catch (ConnectionException $exception) {
-            Log::warning('外部认证业务字典请求连接失败', [
-                'method' => 'GET',
-                'url' => $url,
-                'exception' => $exception->getMessage(),
-            ]);
-
-            return [];
-        }
-
-        $messages = $this->normalizeBizKeyMessages($response->json('data'));
-        if (! $response->successful() || $messages === []) {
-            Log::warning('外部认证业务字典请求返回失败', [
-                'method' => 'GET',
-                'url' => $url,
-                'http_status' => $response->status(),
-            ]);
-
-            return [];
-        }
-
-        if ($scope !== null) {
-            try {
-                $scope->connection()->setex(
-                    $scope->key(self::BIZ_KEYS_CACHE_IDENTIFIER),
-                    self::BIZ_KEYS_CACHE_TTL_SECONDS,
-                    json_encode($messages, JSON_THROW_ON_ERROR | JSON_UNESCAPED_UNICODE),
-                );
-            } catch (Throwable $exception) {
-                Log::warning('外部认证业务字典缓存写入失败', [
-                    'exception' => $exception->getMessage(),
-                ]);
-            }
-        }
-
-        return $messages;
+        return $this->parseResponse($response);
     }
 
-    /**
-     * 仅接受扁平的字符串键值映射，避免把业务响应误当成字典。
-     *
-     * @return array<string, string>
-     */
-    private function normalizeBizKeyMessages(mixed $messages): array
+    /** @param array<string, mixed> $consent @return array<string, mixed> */
+    private function consentPayload(array $consent): array
     {
-        if (! is_array($messages)) {
-            return [];
+        $payload = ['accepted' => (bool) $consent['accepted']];
+        if (isset($consent['policy_hash'])) {
+            $payload['policyHash'] = $consent['policy_hash'];
         }
-
-        if (array_key_exists('biz_key', $messages)
-            || array_key_exists('success', $messages)
-            || array_key_exists('sign', $messages)) {
-            return [];
-        }
-
-        $normalized = [];
-        foreach ($messages as $key => $message) {
-            if (! is_string($key) || ! is_string($message)) {
-                continue;
-            }
-
-            $key = trim($key);
-            $message = trim($message);
-            if ($key !== '' && $message !== '') {
-                $normalized[$key] = $message;
-            }
-        }
-
-        return $normalized;
-    }
-
-    /**
-     * 对日志中的登录信息脱敏。
-     */
-    private function sanitizePayload(array $payload): array
-    {
-        foreach (['username', 'mobile'] as $field) {
-            if (isset($payload[$field])) {
-                $payload[$field] = Str::mask((string) $payload[$field], '*', 3, 4);
-            }
-        }
-
-        foreach (['password', 'code'] as $field) {
-            if (array_key_exists($field, $payload)) {
-                $payload[$field] = '[REDACTED]';
+        if (isset($consent['documents'])) {
+            $payload['documents'] = [];
+            foreach ($consent['documents'] as $document) {
+                $payload['documents'][] = [
+                    'documentCode' => $document['document_code'],
+                    'versionId' => $document['version_id'],
+                ];
             }
         }
 
         return $payload;
+    }
+
+    private function parseResponse(Response $response): ExternalAuthResult
+    {
+        $body = $response->json();
+        $body = is_array($body) ? $body : [];
+        $data = is_array($body['data'] ?? null) ? $body['data'] : [];
+        $code = is_scalar($body['code'] ?? null) ? trim((string) $body['code']) : null;
+        $message = is_scalar($body['msg'] ?? null) ? trim((string) $body['msg']) : null;
+        $traceId = is_scalar($body['traceId'] ?? null)
+            ? trim((string) $body['traceId'])
+            : trim((string) ($response->header('X-Trace-Id') ?? $response->header('traceId') ?? ''));
+        $traceId = $traceId === '' ? null : $traceId;
+
+        return new ExternalAuthResult($response->successful() && $code === 'OK', $code, $message, $data, $traceId);
+    }
+
+    private function url(string $endpoint): ?string
+    {
+        $baseUrl = rtrim((string) config('services.member_auth.base_url'), '/');
+        if ($baseUrl === '') {
+            return null;
+        }
+
+        $path = implode('/', array_filter([
+            trim((string) config('services.member_auth.gateway_prefix', 'api-iam'), '/'),
+            trim((string) config('services.member_auth.api_prefix', 'api/v1'), '/'),
+            trim($endpoint, '/'),
+        ], static fn (string $part): bool => $part !== ''));
+
+        return $baseUrl.'/'.$path;
     }
 }

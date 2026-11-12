@@ -61,7 +61,7 @@ class CaptchaImageGenerator
      */
     private function loadRandomBackgroundDataUri(): string
     {
-        $directory = $this->backgroundDirectory ?? resource_path('captcha');
+        $directory = $this->backgroundDirectory ?? resource_path('captcha/backgrounds');
         $files = glob(rtrim($directory, '/\\').DIRECTORY_SEPARATOR.'*.png');
         if (! is_array($files) || $files === []) {
             throw new RuntimeException('滑块验证码背景资源不存在');
