@@ -2,8 +2,8 @@
 
 namespace App\Services;
 
+use App\Helpers\ResponseHelper;
 use Illuminate\Http\Client\Response;
-use RuntimeException;
 
 /**
  * 关系 Demo 业务服务。
@@ -44,9 +44,10 @@ class RelationService
         );
 
         $relations_data = $relations_response->json('data');
-        if (! is_array($relations_data)) {
-            throw new RuntimeException('关系详情接口未返回有效数据');
-        }
+        ResponseHelper::errorIf(
+            ! is_array($relations_data ?? null),
+            '关系详情接口未返回有效数据',
+        );
 
         $summary_response = $this->http->post(
             url: self::RELATION_SUMMARY_ENDPOINT,
@@ -59,9 +60,10 @@ class RelationService
         );
 
         $summary_data = $summary_response->json('data');
-        if (! is_array($summary_data)) {
-            throw new RuntimeException('关系汇总接口未返回有效数据');
-        }
+        ResponseHelper::errorIf(
+            ! is_array($summary_data ?? null),
+            '关系汇总接口未返回有效数据',
+        );
 
 
 //        return [
@@ -107,9 +109,10 @@ class RelationService
         );
 
         $data = $response->json('data');
-        if (! is_array($data)) {
-            throw new RuntimeException('关系详情接口未返回有效数据');
-        }
+        ResponseHelper::errorIf(
+            ! is_array($data ?? null),
+            '关系详情接口未返回有效数据',
+        );
 
 //        return $data;
         $items = [];
@@ -160,9 +163,10 @@ class RelationService
         );
 
         $data = $response->json('data');
-        if (! is_array($data)) {
-            throw new RuntimeException('关系详情接口未返回有效数据');
-        }
+        ResponseHelper::errorIf(
+            ! is_array($data ?? null),
+            '关系详情接口未返回有效数据',
+        );
 
 //        return $data;
         $items = [];
@@ -212,9 +216,10 @@ class RelationService
         );
 
         $relations_data = $relations_response->json('data');
-        if (! is_array($relations_data)) {
-            throw new RuntimeException('关系详情接口未返回有效数据');
-        }
+        ResponseHelper::errorIf(
+            ! is_array($relations_data ?? null),
+            '关系详情接口未返回有效数据',
+        );
 
         $summary_response = $this->http->post(
             url: self::RELATION_SUMMARY_ENDPOINT,
@@ -227,9 +232,10 @@ class RelationService
         );
 
         $summary_data = $summary_response->json('data');
-        if (! is_array($summary_data)) {
-            throw new RuntimeException('关系汇总接口未返回有效数据');
-        }
+        ResponseHelper::errorIf(
+            ! is_array($summary_data ?? null),
+            '关系汇总接口未返回有效数据',
+        );
 
 //        return $data;
         return [
@@ -278,9 +284,10 @@ class RelationService
             ];
         }
 
-        if (! is_array($data)) {
-            throw new RuntimeException('关系流水接口未返回有效数据');
-        }
+        ResponseHelper::errorIf(
+            ! is_array($data ?? null),
+            '关系流水接口未返回有效数据',
+        );
 
         return [
             'total_exchange_amount' => $data['accumulatedExchangeAmount'] ?? '0.00',
@@ -322,9 +329,10 @@ class RelationService
 
         $data = $response->json('data');
 //        return $data;
-        if (! is_array($data)) {
-            throw new RuntimeException('关系流水接口未返回有效数据');
-        }
+        ResponseHelper::errorIf(
+            ! is_array($data ?? null),
+            '关系流水接口未返回有效数据',
+        );
 
         $items = [];
         $items['total_exchange_amount'] = $item['memberDailyExchangeAmount'] ?? '0.00';
@@ -381,9 +389,7 @@ class RelationService
         $memberType = trim((string) ($user['memberType'] ?? $user['member_type'] ?? ''));
         $token = trim($token);
 
-        if ($mobile === '' || $memberType === '' || $token === '') {
-            throw new RuntimeException('登录用户信息不完整');
-        }
+        ResponseHelper::errorIf($mobile === '' || $memberType === '' || $token === '', '登录用户信息不完整');
 
         return [
             'tenantId' => 'demo',
