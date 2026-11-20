@@ -54,10 +54,10 @@ class BarterService
             $data = $body;
         }
 
-        if (! is_array($data)) {
-            $keys = is_array($body) ? implode(',', array_keys($body)) : get_debug_type($body);
-            throw new RuntimeException('首页指标接口响应结构无法识别，响应字段：'.$keys);
-        }
+        ResponseHelper::errorIf(
+            ! is_array($data ?? null),
+            '今日通宝券和昨日易货额接口未返回有效数据',
+        );
 
         return [
             'today_general_coupon' => $data['tongbaoPrice'] ?? '0.00',
